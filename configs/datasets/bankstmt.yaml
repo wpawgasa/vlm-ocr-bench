@@ -15,4 +15,10 @@ bank_map:
   "*gsb*": gsb
   "*omsin*": gsb
   "*uob*": uob
-layouts: {}  # per-bank row regex layouts, filled in task 5.2
+# Per-bank overrides for what the page's words cannot reveal (task 5.2); row parsing
+# itself is bank-agnostic.
+overrides:
+  ttb:
+    signed_amount: true
+  kbank:
+    amount_column_split: true

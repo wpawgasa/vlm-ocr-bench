@@ -185,6 +185,11 @@ class StatementRow(BaseModel):
     description: str | None = None
     debit: Decimal | None = None
     credit: Decimal | None = None
+    # An unsigned amount from a combined "Withdrawal / Deposit" column, whose side the
+    # extraction could not tell; Check B infers the side from the balance delta and sets
+    # `side_inferred` (such rows are excluded from `row_consistency_rate`).
+    amount: Decimal | None = None
+    side_inferred: bool = False
     balance: Decimal | None = None
     channel: str | None = None
     bbox: BBox | None = None
@@ -201,6 +206,10 @@ class StatementPage(BaseModel):
     period_end: str | None = None
     opening_balance: Decimal | None = None
     closing_balance: Decimal | None = None
+    # Summary totals printed on the page ("TOTAL WITHDRAWAL(S)"/"TOTAL DEPOSIT(S)"),
+    # checked against the row sums by Check B.
+    total_debit: Decimal | None = None
+    total_credit: Decimal | None = None
     rows: list[StatementRow] = Field(default_factory=list)
     page_no: int = 1
 

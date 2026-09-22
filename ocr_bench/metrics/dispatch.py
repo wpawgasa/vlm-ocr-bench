@@ -8,7 +8,8 @@
 | kie, kie_map + json                            | kie_precision, kie_recall, kie_f1,         |
 |                                                | tob_score, plus one FieldResult per field  |
 | classify + json                                | anls, tob_score                            |
-| statement + text_layer                         | cer (field/row scoring is M4)              |
+| statement + text_layer                         | cer, row_precision/recall/f1, header fields|
+| statement + json (manual labels)               | row_precision/recall/f1, header fields     |
 | anything + none                                | no_gt (value None)                         |
 | any other pair                                 | not_applicable (value None)                |
 
@@ -25,11 +26,14 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from ocr_bench.config import BankOverrides
 from ocr_bench.metrics import tob_official
 from ocr_bench.metrics.anls import anls
 from ocr_bench.metrics.cer_wer import cer, wer
 from ocr_bench.metrics.kie_f1 import FieldScore, micro_prf, score_fields, worst_case_fields
+from ocr_bench.metrics.statement_gt import parse_text_layer, score_statement, worst_case_statement
 from ocr_bench.metrics.ted import first_table, ted, ted_docparse
+from ocr_bench.normalize.statement import map_statement_page
 from ocr_bench.schemas import (
     FieldResult,
     GroundTruth,
@@ -40,6 +44,7 @@ from ocr_bench.schemas import (
     PredictionRow,
     ScoreRow,
     Source,
+    StatementPage,
     Task,
     TextGT,
     TextLayerGT,
@@ -122,6 +127,48 @@ def _pred_fields(pred: PredictionRow) -> dict[str, str | None]:
     }
 
 
+Overrides = dict[str, BankOverrides]
+
+
+def overrides_for(row: ManifestRow, overrides: Overrides | None) -> BankOverrides | None:
+    """The bank's parsing overrides, if the dataset config has any for it."""
+    if not overrides or row.bank is None:
+        return None
+    return overrides.get(row.bank)
+
+
+def gt_statement(
+    row: ManifestRow, gt: GroundTruth, overrides: Overrides | None
+) -> tuple[StatementPage | None, bool]:
+    """The ground-truth statement page and whether its column header was found.
+
+    A text layer is parsed on the fly unless `prepare` already stored a parsed
+    `statement`; a manual label (`JsonGT.statement`) is ground truth as given.
+    """
+    if isinstance(gt, JsonGT):
+        return gt.statement, gt.statement is not None
+    if isinstance(gt, TextLayerGT):
+        if gt.statement is not None:
+            return gt.statement, True
+        parsed = parse_text_layer(
+            gt, bank=row.bank, page_no=row.page_no, overrides=overrides_for(row, overrides)
+        )
+        return parsed.page, parsed.has_header
+    return None, False
+
+
+def pred_statement(
+    row: ManifestRow, pred: PredictionRow, overrides: Overrides | None
+) -> StatementPage:
+    """The model's statement page, mapped by the shared rule-based mapper."""
+    return map_statement_page(
+        pred.normalized,
+        bank=row.bank,
+        page_no=row.page_no,
+        overrides=overrides_for(row, overrides),
+    )
+
+
 def _tob_task(row: ManifestRow) -> str | None:
     if row.source == Source.thaiocrbench and row.subtask in tob_official.KEPT_TASKS:
         return row.subtask
@@ -129,18 +176,22 @@ def _tob_task(row: ManifestRow) -> str | None:
 
 
 def _metric_values(
-    row: ManifestRow, gt: GroundTruth, pred: PredictionRow
-) -> tuple[dict[str, float | None], list[FieldScore]]:
-    """Metric values for a scoreable prediction (not a full miss)."""
+    row: ManifestRow, gt: GroundTruth, pred: PredictionRow, overrides: Overrides | None = None
+) -> tuple[dict[str, float | None], list[FieldScore], dict[str, dict]]:
+    """Metric values for a scoreable prediction (not a full miss).
+
+    The third element carries per-metric `extra` (only statements use it so far, to say
+    why a row metric is not applicable)."""
     task = row.task
     text = pred.normalized.text
     answer = answer_text(pred)
     tob_task = _tob_task(row)
     values: dict[str, float | None] = {}
     fields: list[FieldScore] = []
+    metric_extra: dict[str, dict] = {}
 
     if isinstance(gt, NoGT):
-        return {"no_gt": None}, []
+        return {"no_gt": None}, [], {}
     if task in _TEXT_TASKS and isinstance(gt, TextGT):
         values["cer"] = cer(text, gt.text)
         values["wer"] = wer(text, gt.text)
@@ -161,21 +212,46 @@ def _metric_values(
     elif task == Task.classify and isinstance(gt, JsonGT):
         label = pred.normalized.label if pred.normalized.label is not None else pred.raw.text
         values["anls"] = anls(label.strip(), gt.label or "")
-    elif task == Task.statement and isinstance(gt, TextLayerGT):
-        values["cer"] = cer(text, gt.gt_text)
+    elif task == Task.statement and _has_statement_gt(gt):
+        if isinstance(gt, TextLayerGT):
+            values["cer"] = cer(text, gt.gt_text)
+        gt_page, has_header = gt_statement(row, gt, overrides)
+        statement_values, fields = score_statement(
+            pred_statement(row, pred, overrides), gt_page, has_header
+        )
+        values.update(statement_values)
+        if not has_header:
+            metric_extra = {name: {"reason": "no_header"} for name in statement_values}
     else:
-        return {"not_applicable": None}, []
+        return {"not_applicable": None}, [], {}
 
     if tob_task is not None and "tob_score" not in values:
         values["tob_score"] = tob_official.tob_score(tob_task, answer, gt_answer(gt), row.question)
-    return values, fields
+    return values, fields, metric_extra
 
 
-def _worst_values(row: ManifestRow, gt: GroundTruth) -> tuple[dict[str, float | None], list]:
+def _has_statement_gt(gt: GroundTruth) -> bool:
+    """True for ground truth that carries statement rows/fields: a text layer, or a
+    manual label whose `statement` was filled in by `ocrbench review load`."""
+    if isinstance(gt, TextLayerGT):
+        return True
+    return isinstance(gt, JsonGT) and gt.statement is not None
+
+
+def _worst_values(
+    row: ManifestRow, gt: GroundTruth, overrides: Overrides | None = None
+) -> tuple[dict[str, float | None], list, dict[str, dict]]:
     """The metric names a scoreable prediction would get, at their worst values."""
     task = row.task
     if isinstance(gt, NoGT):
-        return {"no_gt": None}, []
+        return {"no_gt": None}, [], {}
+    if task == Task.statement and _has_statement_gt(gt):
+        gt_page, has_header = gt_statement(row, gt, overrides)
+        values, fields = worst_case_statement(gt_page, has_header)
+        if isinstance(gt, TextLayerGT):
+            values["cer"] = _WORST["cer"]
+        extra = {} if has_header else {n: {"reason": "no_header"} for n in values if n != "cer"}
+        return values, fields, extra
     if task in _TEXT_TASKS and isinstance(gt, TextGT):
         names = ["cer", "wer", "bmfl"]
     elif task == Task.table and isinstance(gt, HtmlGT):
@@ -186,31 +262,33 @@ def _worst_values(row: ManifestRow, gt: GroundTruth) -> tuple[dict[str, float | 
         names = ["kie_precision", "kie_recall", "kie_f1"]
     elif task == Task.classify and isinstance(gt, JsonGT):
         names = ["anls"]
-    elif task == Task.statement and isinstance(gt, TextLayerGT):
-        names = ["cer"]
     else:
-        return {"not_applicable": None}, []
+        return {"not_applicable": None}, [], {}
     if _tob_task(row) is not None:
         names.append("tob_score")
     fields = worst_case_fields(gt.fields) if isinstance(gt, JsonGT) and task in _KIE_TASKS else []
-    return {n: _WORST.get(n, 0.0) for n in names}, fields
+    return {n: _WORST.get(n, 0.0) for n in names}, fields, {}
 
 
 def score_sample(
-    row: ManifestRow, gt: GroundTruth, pred: PredictionRow | None, model: str
+    row: ManifestRow,
+    gt: GroundTruth,
+    pred: PredictionRow | None,
+    model: str,
+    overrides: Overrides | None = None,
 ) -> SampleScores:
     """Score rows (and field rows) for one manifest row and one model's prediction."""
     extra: dict = {}
     if pred is None:
         extra = {"full_miss": True, "missing_prediction": True}
-        values, fields = _worst_values(row, gt)
+        values, fields, metric_extra = _worst_values(row, gt, overrides)
     elif is_full_miss(pred):
         extra = {"full_miss": True, "error": pred.raw.error}
-        values, fields = _worst_values(row, gt)
+        values, fields, metric_extra = _worst_values(row, gt, overrides)
     else:
         if pred.raw.error is not None:
             extra = {"partial": True, "error": pred.raw.error}
-        values, fields = _metric_values(row, gt, pred)
+        values, fields, metric_extra = _metric_values(row, gt, pred, overrides)
 
     slice_keys = dict(
         sample_id=row.sample_id,
@@ -231,7 +309,7 @@ def score_sample(
                 metric=metric,
                 value=None if value is None else float(value),
                 is_critical=None,
-                extra=dict(extra),
+                extra={**extra, **metric_extra.get(metric, {})},
             )
         )
     critical = set(row.critical_fields)
@@ -256,6 +334,7 @@ def score_run(
     manifest: list[ManifestRow],
     latest: dict[tuple[str, str, str], PredictionRow],
     load_gt: Callable[[ManifestRow], GroundTruth],
+    overrides: Overrides | None = None,
 ) -> tuple[list[ScoreRow], list[FieldResult]]:
     """Score every manifest row for every model that has predictions in the run.
 
@@ -270,7 +349,7 @@ def score_run(
         gt = load_gt(row)
         for model in models:
             pred = latest.get((row.sample_id, row.condition.value, model))
-            result = score_sample(row, gt, pred, model)
+            result = score_sample(row, gt, pred, model, overrides)
             scores.extend(result.scores)
             fields.extend(result.fields)
     scores.sort(key=lambda s: (s.sample_id, s.condition.value, s.model, s.metric))

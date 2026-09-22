@@ -140,10 +140,21 @@ class ThaiOCRBenchConfig(BaseModel):
     priority_domains: list[str] = Field(default_factory=lambda: ["Government", "Finance"])
 
 
-class RowLayout(BaseModel):
+class BankOverrides(BaseModel):
+    """Per-bank details the page's own words cannot reveal (task 5.2).
+
+    Row parsing is bank-agnostic: these only override what a layout cannot show.
+    `date_format` is a `datetime.strptime` format tried before the generic date parser,
+    `signed_amount` says a single amount column carries its sign (TTB), and
+    `amount_column_split` allows a combined "Withdrawal / Deposit" column to take the
+    side from the x-position of the amount (KBank).
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    pattern: str
+    date_format: str | None = None
+    signed_amount: bool = False
+    amount_column_split: bool = True
 
 
 class CorpusTargets(BaseModel):
@@ -163,7 +174,7 @@ class BankStmtConfig(BaseModel):
     dpi: int = 200
     banks: list[str]
     bank_map: dict[str, str]
-    layouts: dict[str, RowLayout] = Field(default_factory=dict)
+    overrides: dict[str, BankOverrides] = Field(default_factory=dict)
     targets: CorpusTargets = Field(default_factory=CorpusTargets)
 
 

@@ -15,6 +15,8 @@ import typer
 import yaml
 
 from ocr_bench.config import (
+    BankOverrides,
+    BankStmtConfig,
     ConfigError,
     ModelConfig,
     ResolvedConfig,
@@ -29,6 +31,8 @@ from ocr_bench.jsonl import latest_predictions, read_rows, write_rows_atomic
 from ocr_bench.metrics import tob_official
 from ocr_bench.metrics.aggregate import aggregate
 from ocr_bench.metrics.dispatch import score_run
+from ocr_bench.metrics.duplicates import TARGET_ORIGINALS, build_dupset, eval_dupset
+from ocr_bench.metrics.statement_run import file_id_for, map_pages, run_statement_checks
 from ocr_bench.models import registry
 from ocr_bench.models.base import OcrModel
 from ocr_bench.models.probe import build_probe_report, probe_model, select_probe_pages
@@ -37,12 +41,23 @@ from ocr_bench.models.vllm_client import EndpointUnavailable
 from ocr_bench.paths import MissingArtifactError, RunPaths, require
 from ocr_bench.schemas import (
     GROUND_TRUTH,
+    Condition,
     GroundTruth,
+    JsonGT,
     ManifestRow,
     NoGT,
     PredictionRow,
     PrepareSummary,
     Task,
+)
+from ocr_bench.statement_review import (
+    AGREEMENT_SAMPLE,
+    LabelError,
+    load_labels,
+    load_manual_pages,
+    queue_rows,
+    write_manual_gt,
+    write_queue,
 )
 
 app = typer.Typer(
@@ -317,8 +332,13 @@ def score(
         typer.echo(f"warning: {stray} prediction rows match no manifest row; ignored", err=True)
 
     gt_cache: dict[str, GroundTruth] = {}
+    manual = load_manual_pages(rp)
 
     def load_gt(row: ManifestRow) -> GroundTruth:
+        # A manually labelled page is ground truth for every condition of that page, in
+        # preference to its text layer (or to having none at all).
+        if row.sample_id in manual:
+            return JsonGT(gt_kind="json", statement=manual[row.sample_id])
         if row.gt_path is None:
             return NoGT(gt_kind="none")
         if row.gt_path not in gt_cache:
@@ -326,9 +346,16 @@ def score(
             gt_cache[row.gt_path] = GROUND_TRUTH.validate_json(text)
         return gt_cache[row.gt_path]
 
-    scores, fields = score_run(manifest, latest, load_gt)
+    overrides = _bank_overrides(rp)
+    scores, fields = score_run(manifest, latest, load_gt, overrides)
+    statement_scores, statements = run_statement_checks(manifest, latest, overrides, manual)
+    scores = sorted(
+        [*scores, *statement_scores],
+        key=lambda s: (s.sample_id, s.condition.value, s.model, s.metric),
+    )
     write_rows_atomic(rp.scores, scores)
     write_rows_atomic(rp.fields, fields)
+    write_rows_atomic(rp.statements, statements)
 
     run_cfg = _run_config_for(rp)
     aggregates = aggregate(scores, fields, run_cfg.bootstrap_resamples, run_cfg.seed)
@@ -342,12 +369,24 @@ def score(
     missing = sum(1 for s in scores if s.extra.get("missing_prediction"))
     typer.echo(
         f"scored {len(manifest)} manifest rows: {len(scores)} score rows, "
-        f"{len(fields)} field rows, {len(aggregates)} aggregate rows"
+        f"{len(fields)} field rows, {len(aggregates)} aggregate rows, "
+        f"{len(statements)} statement files"
     )
     if missing:
         typer.echo(f"warning: {missing} score rows are for missing predictions", err=True)
     if not_comparable:
         typer.echo(f"tob_score not comparable for: {', '.join(not_comparable)}", err=True)
+
+
+def _bank_overrides(rp: RunPaths) -> dict[str, BankOverrides]:
+    """The statement dataset's per-bank parsing overrides from the run's resolved config."""
+    if not rp.config_resolved.exists():
+        return {}
+    data = yaml.safe_load(rp.config_resolved.read_text(encoding="utf-8")) or {}
+    for dataset in (data.get("datasets") or {}).values():
+        if isinstance(dataset, dict) and dataset.get("kind") == "bankstmt":
+            return BankStmtConfig.model_validate(dataset).overrides
+    return {}
 
 
 def _run_config_for(rp: RunPaths) -> RunConfig:
@@ -357,6 +396,133 @@ def _run_config_for(rp: RunPaths) -> RunConfig:
         if "run" in data:
             return RunConfig.model_validate(data["run"])
     return RunConfig(models=[], datasets=[])
+
+
+review_app = typer.Typer(
+    name="review",
+    no_args_is_help=True,
+    help="Statement review queue and manual anchor labels.",
+)
+app.add_typer(review_app, name="review")
+
+
+@review_app.command("export")
+def review_export(
+    run_id: str = typer.Option(..., "--run-id", help="Run id to export a review queue for."),
+    condition: Condition = typer.Option(  # noqa: B008 — typer's own default-injection idiom
+        Condition.clean, "--condition", help="Condition whose pages are reviewed."
+    ),
+    agreement_sample: float = typer.Option(
+        AGREEMENT_SAMPLE,
+        "--agreement-sample",
+        min=0.0,
+        max=1.0,
+        help="Share of agreeing cells to sample (disagreements are always exported).",
+    ),
+) -> None:
+    """Write `runs/<id>/review/queue.csv`: every cross-model disagreement plus a seeded
+    10% sample of the agreements, with one value column per model and an empty label."""
+    rp = RunPaths.for_run(run_id)
+    _require_or_exit(rp.manifest, "prepare")
+    _require_or_exit(rp.predictions, "infer")
+
+    manifest = [r for r in read_rows(rp.manifest, ManifestRow) if r.task == Task.statement]
+    rows = [r for r in manifest if r.condition == condition]
+    latest = latest_predictions(rp.predictions)
+    models = sorted({model for (_, _, model) in latest})
+    if not models:
+        typer.echo("no predictions to review", err=True)
+        raise typer.Exit(code=2)
+
+    pages = map_pages(rows, latest, _bank_overrides(rp), models)
+    run_cfg = _run_config_for(rp)
+    queue = queue_rows(
+        {(sample_id, model): page for (sample_id, _, model), page in pages.items()},
+        models,
+        file_ids={r.sample_id: file_id_for(r.sample_id) for r in rows},
+        page_numbers={r.sample_id: r.page_no for r in rows},
+        seed=run_cfg.seed,
+        agreement_sample=agreement_sample,
+    )
+    n = write_queue(rp.review_queue, queue, models)
+    typer.echo(f"wrote {n} review rows for {len(rows)} pages to {rp.review_queue}")
+
+
+@review_app.command("load")
+def review_load(
+    run_id: str = typer.Option(..., "--run-id", help="Run id the labels belong to."),
+    labels: Path = typer.Option(  # noqa: B008 — typer's own default-injection idiom
+        ..., "--labels", help="Filled queue CSV to load."
+    ),
+) -> None:
+    """Validate a filled label CSV and store it as statement ground truth."""
+    rp = RunPaths.for_run(run_id)
+    _require_or_exit(rp.manifest, "prepare")
+    if not labels.exists():
+        typer.echo(f"labels file not found: {labels}", err=True)
+        raise typer.Exit(code=2)
+    try:
+        pages = load_labels(labels)
+    except LabelError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    written = write_manual_gt(rp, pages)
+    rows = sum(len(p.rows) for p in pages.values())
+    typer.echo(f"loaded labels for {len(written)} pages ({rows} rows) into {rp.gt_manual}")
+
+
+dupset_app = typer.Typer(
+    name="dupset",
+    no_args_is_help=True,
+    help="Duplicate-statement test set: build it, then evaluate the detector.",
+)
+app.add_typer(dupset_app, name="dupset")
+
+
+@dupset_app.command("build")
+def dupset_build(
+    run_id: str = typer.Option(..., "--run-id", help="Source run to draw statements from."),
+    dup_run_id: str = typer.Option(..., "--dup-run-id", help="Run id to create."),
+    seed: int | None = typer.Option(None, "--seed", help="Selection seed (default: run.yaml's)."),
+    n_originals: int = typer.Option(
+        TARGET_ORIGINALS, "--n-originals", min=1, help="Originals to draw."
+    ),
+) -> None:
+    """Build a separate run of originals, variants and hard negatives for `infer`."""
+    src = RunPaths.for_run(run_id)
+    _require_or_exit(src.manifest, "prepare")
+    dst = RunPaths.for_run(dup_run_id)
+    dupset = build_dupset(
+        src,
+        dst,
+        seed=seed if seed is not None else _run_config_for(src).seed,
+        n_originals=n_originals,
+    )
+    for warning in dupset.warnings:
+        typer.echo(f"warning: {warning}", err=True)
+    typer.echo(
+        f"built {dupset.n_originals} originals, {len(dupset.pairs)} pairs "
+        f"({dupset.n_negatives} negatives) in {dst.root}; run `ocrbench infer --run-id "
+        f"{dup_run_id}` next"
+    )
+
+
+@dupset_app.command("eval")
+def dupset_eval(
+    dup_run_id: str = typer.Option(..., "--dup-run-id", help="Duplicate run to evaluate."),
+) -> None:
+    """Evaluate duplicate detection over the built set's predictions."""
+    dst = RunPaths.for_run(dup_run_id)
+    _require_or_exit(dst.dupset, "dupset build")
+    _require_or_exit(dst.predictions, "infer")
+    rows, details = eval_dupset(dst, overrides=_bank_overrides(dst))
+    for row in rows:
+        typer.echo(
+            f"{row.model} t={row.threshold}: recall="
+            f"{'n/a' if row.recall is None else f'{row.recall:.2f}'} fpr="
+            f"{'n/a' if row.fpr is None else f'{row.fpr:.2f}'}"
+        )
+    typer.echo(f"wrote {len(rows)} sweep rows and {len(details)} pair rows to {dst.root}")
 
 
 @app.command()

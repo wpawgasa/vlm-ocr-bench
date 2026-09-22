@@ -33,7 +33,20 @@ uv run pytest          # runs tests/ (live-server tests are skipped by default)
 uv run ocrbench --help # lists the prepare/infer/probe/score/calibrate/bench-latency/report stages
 ocrbench prepare --config configs/run.yaml --run-id <id> [--datasets thaiocrbench]
 uv run ocrbench infer --run-id <id> [--models teleocr,dotsocr]
-uv run ocrbench score --run-id <id>  # scores/fields/aggregates.jsonl + tob_parity.json
+uv run ocrbench score --run-id <id>  # scores/fields/aggregates/statements.jsonl + tob_parity.json
+```
+
+Statement-only stages (M4):
+
+```bash
+# review queue: every cross-model disagreement + a seeded 10% of agreements
+uv run ocrbench review export --run-id <id>            # -> runs/<id>/review/queue.csv
+# load the filled queue back as statement ground truth (rejects a bad line by number)
+uv run ocrbench review load --run-id <id> --labels runs/<id>/review/queue.csv
+# duplicate detection: build a separate run of originals, variants and hard negatives
+uv run ocrbench dupset build --run-id <id> --dup-run-id <id>-dup
+uv run ocrbench infer --run-id <id>-dup
+uv run ocrbench dupset eval --dup-run-id <id>-dup      # -> runs/<id>-dup/duplicates.jsonl
 ```
 
 ## Prepared data (DVC)

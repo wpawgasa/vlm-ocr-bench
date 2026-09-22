@@ -225,7 +225,10 @@ def test_score_writes_every_branch(run):
     assert by_field["ชื่อ"].is_critical is False
     assert by_field["เพิ่ม"].gt is None and by_field["เพิ่ม"].false_accept is True
     assert by_field["หมายเหตุ"].field_exact == 1  # blank == blank
-    assert all(r.subtask == "Key information extraction" for r in fields)
+    kie_fields = [r for r in fields if r.task.value == "kie"]
+    assert all(r.subtask == "Key information extraction" for r in kie_fields)
+    # statements now contribute their own header-field rows (M4)
+    assert {r.field for r in fields if r.task.value == "statement"} >= {"account_no"}
 
     parity = json.loads((run.root / "tob_parity.json").read_text(encoding="utf-8"))
     assert parity == FAKE_PARITY

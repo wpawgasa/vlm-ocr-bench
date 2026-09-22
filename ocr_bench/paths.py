@@ -38,6 +38,30 @@ class RunPaths:
         return self.root / "fields.jsonl"
 
     @property
+    def statements(self) -> Path:
+        return self.root / "statements.jsonl"
+
+    @property
+    def review_queue(self) -> Path:
+        return self.root / "review" / "queue.csv"
+
+    @property
+    def gt_manual(self) -> Path:
+        return self.root / "gt_manual"
+
+    @property
+    def dupset(self) -> Path:
+        return self.root / "dupset.json"
+
+    @property
+    def duplicates(self) -> Path:
+        return self.root / "duplicates.jsonl"
+
+    @property
+    def duplicate_pairs(self) -> Path:
+        return self.root / "duplicate_pairs.jsonl"
+
+    @property
     def aggregates(self) -> Path:
         return self.root / "aggregates.jsonl"
 

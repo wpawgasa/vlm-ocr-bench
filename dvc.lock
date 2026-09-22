@@ -5,8 +5,8 @@ stages:
     deps:
     - path: configs/datasets
       hash: md5
-      md5: cd17c1ae09c21d5c5c934f73d04275f7.dir
-      size: 1373
+      md5: b6da9053a3a2ecadf784572588a8d608.dir
+      size: 1504
       nfiles: 2
     - path: configs/run.yaml
       hash: md5
@@ -25,8 +25,8 @@ stages:
     outs:
     - path: data/runs/2026-09-22-a/config.resolved.yaml
       hash: md5
-      md5: a74edaa514fe2ca9b70eea807f369ba3
-      size: 1982
+      md5: be36f2e63e95061ebe2235d813a37cde
+      size: 2182
     - path: data/runs/2026-09-22-a/gt
       hash: md5
       md5: 64a6fa9b902122f5e1d702da829e5fef.dir
