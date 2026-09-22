@@ -117,7 +117,33 @@ class NormalizedPage(BaseModel):
     parse_error: str | None = None
 
 
+class RawCall(BaseModel):
+    """One request of a page's pipeline, verbatim (TeleOCR pages have one layout call plus
+    one call per block; every other plan has a single call)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["single", "layout", "block"]
+    block_index: int | None = None
+    block_type: str | None = None
+    text: str = ""
+    tokens: list[str] = Field(default_factory=list)
+    token_logprobs: list[float] = Field(default_factory=list)
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    latency_ms: float = 0.0
+    ttft_ms: float | None = None
+    error: str | None = None
+
+
 class RawPrediction(BaseModel):
+    """Page-level aggregate of the page's calls.
+
+    `text` is the model's page-level text (two-stage: block texts joined in reading order);
+    `tokens`/`token_logprobs` are all calls concatenated in call order; `error` is the
+    page-level error or None.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     text: str = ""
@@ -127,6 +153,7 @@ class RawPrediction(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     error: str | None = None
+    calls: list[RawCall] = Field(default_factory=list)
 
 
 class PredictionRow(BaseModel):
@@ -141,6 +168,7 @@ class PredictionRow(BaseModel):
     latency_ms: float
     prompt_tokens: int
     completion_tokens: int
+    n_requests: int = 1
 
 
 class Word(BaseModel):

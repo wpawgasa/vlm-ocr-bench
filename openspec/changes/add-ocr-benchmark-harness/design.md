@@ -47,23 +47,46 @@ The package is `ocr_bench/` with the subpackages `data/`, `models/`, `normalize/
 - `configs/models/*.yaml` holds each model's endpoint env var, served name, per-task `{prompt, version}` and parser id.
 - `configs/datasets/*.yaml` holds task-name mapping, caps, the seed, the bank-name mapping and per-bank row regex layouts.
 
-Configs are loaded into pydantic models, so a bad config fails before any work starts. `prepare` writes `config.resolved.yaml`.
+Configs are loaded into pydantic models, so a bad config fails before any work starts. `prepare` writes `config.resolved.yaml` (run and datasets only) and `infer` writes `config.infer.yaml` (models). The DVC `prepare` stage depends only on `configs/run.yaml`, `configs/datasets`, `data/statements` and `ocr_bench/data`, so model-side changes never mark prepared data stale.
 
-### D4. vLLM access through the `openai` SDK with a thin client
+### D4. vLLM access through the `openai` SDK, adapters as request plans
 `models/vllm_client.py` wraps `openai.AsyncOpenAI` as follows:
 
 - The image is sent as a base64 PNG data URL.
-- Requests set `logprobs=True, top_logprobs=0`, plus `temperature=0`, `seed=0` and `max_tokens=4096`.
-- `asyncio.Semaphore(concurrency)`.
-- `asyncio.wait_for` with a 120 s timeout and 1 retry.
-- `time.perf_counter` timing.
+- Requests set `logprobs=True, top_logprobs=0`, plus `temperature=0` and `seed=0`. `max_tokens` is 4096 unless the model's config overrides it.
+- Official per-model decoding goes through `extra_body`: TeleOCR's `presence_penalty`/`frequency_penalty` (standard fields) and `no_repeat_ngram_size`, which only its vLLM plugin understands. Each model config states its settings per request type, and `config.infer.yaml` records them.
+- `asyncio.Semaphore(concurrency)` counts **pages** in flight. A page's own requests (TeleOCR's block calls) run concurrently inside it, bounded by a per-page limit of 8.
+- `asyncio.wait_for` with a 120 s timeout and 1 retry, **per request**.
+- `time.perf_counter` timing, taken per page.
 - Streaming is used only in the latency harness (for TTFT).
 
-Adapters (`teleocr.py`, `dotsocr.py`, `typhoon.py`) implement the `OcrModel` protocol from spec §4.1. They differ only in prompt building and parser choice.
+Adapters (`teleocr.py`, `dotsocr.py`, `typhoon.py`) implement `OcrModel`. Each maps `(task, subtask)` to a **request plan** from its config:
+
+- `single`: one call on the whole image.
+- `crop_single`: the harness crops the fine-grained region, then makes one call.
+- `grounding`: one call with a bbox embedded in the prompt (dots.ocr).
+- `two_stage`: TeleOCR's layout call at 1036×1036, then one call per detected block, following TeleOCR's official client:
+  - Crop from the original image, using polygon masks when the box has more than 2 points.
+  - Rotate the crop by the block's angle.
+  - Pad or upscale via `resize_by_need`: maximum edge ratio, minimum edge.
+  - Use a type-specific prompt and sampling.
+  - Skip `image`, `list` and `equation_block` blocks.
+- `question`: send the sample's benchmark question (the fallback).
+
+The plan's version tag is `prompt_version`. The policy table lives in the model-inference spec.
 *Alternative:* raw `httpx`. Rejected: the SDK handles the multimodal message shape and logprob parsing, and the code stays small.
+*Alternative:* one prompt per task for every model. Rejected: all three models are trained on fixed prompts. See the model-inference spec.
 
 ### D5. Parsers per output dialect, not per model
-`models/parsers.py` provides `markdown`, `html_table`, `json_fields` and `dots_layout_json` parsers. The dots.ocr layout JSON carries bbox, category and text, and maps to `Block`. Each model config names a parser per task. Parsing failures produce a `NormalizedPage` with `parse_error` and never raise, as the output-normalization spec requires.
+`models/parsers.py` provides these parsers:
+
+- `markdown`, `html_table` and `json_fields`.
+- `dots_layout_json`: a list of `{bbox, category, text}`, mapped to `Block`. Table text is HTML.
+- `teleocr_layout`: lines of `<box:x1 y1 … ><label:type><angle tag>` with 0–1000 coordinates, possibly polygons, mapped to blocks. Block texts come from the block calls.
+- `otsl_to_html`: TeleOCR tables, with spans, ported from TeleOCR's reference `convert_otsl_to_html`.
+- `typhoon_markdown`: markdown with embedded `<table>` HTML, `<figure>` and `<page_number>` tags.
+
+Each model config names a parser per request type. Parsing failures produce a `NormalizedPage` with `parse_error` and never raise, as the output-normalization spec requires. The statement mapper (M4) consumes only `NormalizedPage.tables` and `.blocks`, so it is model-independent.
 
 ### D6. Metric implementations
 - **CER:** `rapidfuzz.distance.Levenshtein` over NFC strings.
@@ -127,12 +150,19 @@ The harness uses the same client in streaming mode.
 - An end-to-end smoke test builds a tiny synthetic run of 3 ThaiOCRBench-like samples and 1 generated digital PDF, then runs `prepare → score → calibrate → report` with a fake model client.
 - Live-server tests are marked `@pytest.mark.live` and skipped by default.
 
+### D14. TeleOCR serving with its vLLM plugin
+TeleOCR's official vLLM path registers a modified `Qwen2_5_VLForConditionalGeneration` via the `TeleOCR_vllm` plugin (from github.com/caipeng328/TeleOCR), and its sampling uses `no_repeat_ngram_size`. The compose `teleocr` service therefore builds a small derived image, `.devcontainer/teleocr-vllm.Dockerfile` (`FROM ${VLLM_IMAGE}`), which pip-installs the plugin at a pinned commit, instead of using the stock image. dots.ocr and typhoon keep the stock vLLM image.
+*Alternative:* the stock image with the upstream Qwen2.5-VL class. Rejected: it silently ignores `no_repeat_ngram_size` and TeleOCR's architecture changes, which would understate the model.
+
 ## Risks / Trade-offs
 
 - **Task names, domain field or license in ThaiOCRBench differ from expectations** → The loader asserts task names and prints what is present, and the domain slice is optional. Confirm the license before quoting.
 - **BMFL port drifts from the official scorer** → A mandatory fixture gate applies. On failure, the report marks BMFL "not comparable" and CER/WER still stand.
 - **TeleOCR emits no bbox or no JSON** → The probe records `no`. dots.ocr carries Q4, and TeleOCR shows text-only rows. The scorecard never errors on a missing capability.
 - **Logprob span matching fails often (for example, the model reformats numbers)** → The digit-only fallback is used, and `span_found` rate is reported. The `agree` and `arith` features still carry signal.
+- **Some handwriting questions are QA ("what does item 3 say?")** → Native OCR returns the whole text, so these samples score poorly by construction. The report shows handwriting separately, with this caveat.
+- **TeleOCR is trained for Chinese and English only** → Its Thai quality is exactly what the benchmark measures. The probe and the Q1 matrix state it plainly.
+- **Native prompts make KIE/classification mostly unsupported** → The fallback question is still sent and scored. The probe records `no` for JSON extraction, which answers Q4 honestly.
 - **Too few digital statement pages (< 40)** → `prepare` warns, and the manual set becomes the primary statement label source.
 - **Calibration is fitted on benchmark data, not บสย. documents** → The report states that thresholds must be re-fitted on client documents. `thresholds.json` makes the procedure repeatable.
 - **Client data leakage** → `data/`, `runs/`, `review/` and `*.pdf` are gitignored, only `report/samples/` is anonymized, and there is a test for the anonymizer.

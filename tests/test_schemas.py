@@ -25,6 +25,7 @@ from ocr_bench.schemas import (
     OutputSource,
     PredictionRow,
     PrepareSummary,
+    RawCall,
     RawPrediction,
     ScoreRow,
     Source,
@@ -449,3 +450,46 @@ def test_prepare_summary_defaults():
 def test_prepare_summary_forbids_unknown_key():
     with pytest.raises(ValidationError):
         PrepareSummary(run_id="run-1", bogus_field="nope")
+
+
+def test_raw_call_roundtrip_and_forbids_unknown():
+    call = RawCall(
+        kind="block",
+        block_index=2,
+        block_type="table",
+        text="<fcel>A<nl>",
+        tokens=["<fcel>", "A"],
+        token_logprobs=[-0.1, -0.2],
+        prompt_tokens=100,
+        completion_tokens=2,
+        latency_ms=50.0,
+        ttft_ms=10.0,
+        error=None,
+    )
+    _roundtrip(call)
+    with pytest.raises(ValidationError):
+        RawCall(kind="single", bogus=1)
+    with pytest.raises(ValidationError):
+        RawCall(kind="nope")
+
+
+def test_raw_prediction_calls_default_empty_and_roundtrip():
+    assert RawPrediction().calls == []
+    raw = RawPrediction(text="x", calls=[RawCall(kind="layout"), RawCall(kind="block")])
+    _roundtrip(raw)
+
+
+def test_prediction_row_n_requests_default_and_roundtrip():
+    row = PredictionRow(
+        sample_id="s1",
+        condition=Condition.clean,
+        model="teleocr",
+        prompt_version="teleocr-2stage-v1",
+        raw=RawPrediction(text="hi"),
+        normalized=NormalizedPage(text="hi"),
+        latency_ms=100.0,
+        prompt_tokens=5,
+        completion_tokens=1,
+    )
+    assert row.n_requests == 1
+    _roundtrip(row.model_copy(update={"n_requests": 7}))

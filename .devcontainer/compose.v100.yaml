@@ -6,8 +6,15 @@
 # - V100 (sm_70) has no bf16 -> fp16. Qwen2.5-VL-based models may overflow in fp16.
 # - vLLM images need CUDA >= 12.8; the 535 driver only works via the forward-compat libs in the image.
 # - vLLM >= 0.20 dropped sm_70; keep VLLM_IMAGE at an older tag.
+# - FlashInfer has no sm_70 kernels (its JIT arch check crashes on 7.x), so the V1
+#   top-k/top-p sampler must use the PyTorch path: VLLM_USE_FLASHINFER_SAMPLER=0.
+# - Known limit (2026-09-22 smoke test, vLLM 0.11): sm_70 falls back to FlexAttention,
+#   which is slow (~10 s for a 9-token reply) and crashed dots.ocr mid-run with a CUDA
+#   illegal memory access in torch.compile'd block-mask creation. TRITON_ATTN is not an
+#   option (unsupported for the vision encoder). Use this override for plumbing checks only.
 x-v100-env: &v100-env
   NVIDIA_DISABLE_REQUIRE: "1"
+  VLLM_USE_FLASHINFER_SAMPLER: "0"
   LD_LIBRARY_PATH: /usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
 
 services:
@@ -16,6 +23,7 @@ services:
     command:
       - '--model=StarDoc-AI/TeleOCR'
       - '--served-model-name=teleocr'
+      - '--logits-processors=teleocr_no_repeat_ngram:VllmV1NoRepeatNGramLogitsProcessor'
       - '--trust-remote-code'
       - '--dtype=half'
       - '--max-model-len=16384'

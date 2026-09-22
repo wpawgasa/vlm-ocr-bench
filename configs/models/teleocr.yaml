@@ -1,32 +1,98 @@
-# Prompts below are placeholders; task 3.4 replaces them with tuned prompts.
+# TeleOCR (Qwen2.5-VL based, decoupled two-stage). Prompts, pre-processing and sampling
+# follow the official client, github.com/caipeng328/TeleOCR TeleOCR/vlm_utils/TeleOCR_client.py.
+# Policy table: openspec model-inference spec. Leading "\n" in prompts is intentional.
 endpoint_env: TELEOCR_BASE_URL
 served_model_name: teleocr
-default_parser: markdown
-prompts:
-  ocr_fullpage:
-    prompt: "Extract all text on this page in reading order as plain text."
-    version: "ocr_fullpage-v0"
-  ocr_line:
-    prompt: "Transcribe the text in this line or region exactly as written."
-    version: "ocr_line-v0"
-  handwriting:
-    prompt: "Transcribe the handwritten content on this page as plain text."
-    version: "handwriting-v0"
+system_prompt: "You are a helpful assistant."
+image_resize: none
+
+# Block sampling for text/equation/code/default; also used by single-call plans.
+sampling: &text_sampling
+  max_tokens: 4096
+  temperature: 0.0
+  top_p: 0.01
+  top_k: 1
+  repetition_penalty: 1.0
+  presence_penalty: 1.0
+  frequency_penalty: 0.05
+  vllm_xargs: {no_repeat_ngram_size: 100}
+
+x-table-sampling: &table_sampling
+  max_tokens: 4096
+  temperature: 0.0
+  top_p: 0.01
+  top_k: 1
+  repetition_penalty: 1.0
+  presence_penalty: 1.0
+  frequency_penalty: 0.005
+  vllm_xargs: {no_repeat_ngram_size: 100}
+
+x-two-stage: &two_stage
+  layout_prompt: "\nAnalyze the image layout."
+  layout_size: [1036, 1036]
+  layout_sampling:
+    max_tokens: 4096
+    temperature: 0.0
+    top_p: 0.01
+    top_k: 1
+    repetition_penalty: 1.0
+    presence_penalty: 0.0
+    frequency_penalty: 0.0
+    vllm_xargs: {no_repeat_ngram_size: 100}
+  block_prompts:
+    text: "\nPlease output the text content from the image."
+    table: "\nThis is the image of a table. Please output the table in OTSL format."
+    equation: "\nPlease write out the expression of the formula in the image using LaTeX format."
+    code: "\nThe image contains a code snippet, please output the parsing result."
+    seal: "\nSeal Recognition:"
+    char: "\nThis is a scientific figure. Please extract the table implied by this figure."
+    default: "\nPlease output the text content from the image."
+  block_sampling:
+    text: *text_sampling
+    equation: *text_sampling
+    code: *text_sampling
+    default: *text_sampling
+    table: *table_sampling
+    char: *table_sampling
+    seal: *table_sampling
+  skip_types: [image, list, equation_block]
+  min_edge: 28
+  max_edge_ratio: 50
+  max_pixels: 64000000
+  block_concurrency: 8
+
+x-question: &question
+  kind: question
+  version: question-v1
+  parser: json_fields
+
+x-text-prompt: &text_prompt "\nPlease output the text content from the image."
+
+plans:
+  ocr_fullpage: &two_stage_plan
+    kind: two_stage
+    version: teleocr-2stage-v1
+    parser: teleocr_layout
+    two_stage: *two_stage
+  docparse: *two_stage_plan
+  statement: *two_stage_plan
+  ocr_line: &text_plan
+    kind: single
+    version: teleocr-text-v1
+    prompt: *text_prompt
+    parser: markdown
+  handwriting: *text_plan
+  "ocr_line@Fine-grained text recognition":
+    kind: crop_single
+    version: teleocr-crop-text-v1
+    prompt: *text_prompt
+    parser: markdown
   table:
-    prompt: "Extract the table on this page as an HTML table, preserving rows and cells."
-    version: "table-v0"
-  docparse:
-    prompt: "Parse this document page into reading-order text and note any tables or figures."
-    version: "docparse-v0"
-  kie:
-    prompt: "Extract the requested fields from this page as JSON, using null for any field that is absent."
-    version: "kie-v0"
-  kie_map:
-    prompt: "Extract the requested fields from this page as a JSON object mapping each field name to its value, using null for any field that is absent."
-    version: "kie_map-v0"
-  classify:
-    prompt: "Classify this document page and return its document type as plain text."
-    version: "classify-v0"
-  statement:
-    prompt: "Extract this bank statement page as JSON matching the statement schema: bank, account_no, account_name, period_start, period_end, opening_balance, closing_balance, and rows of date, description, debit, credit, balance."
-    version: "statement-v0"
+    kind: single
+    version: teleocr-otsl-v1
+    prompt: "\nThis is the image of a table. Please output the table in OTSL format."
+    parser: otsl
+    sampling: *table_sampling
+  kie: *question
+  kie_map: *question
+  classify: *question

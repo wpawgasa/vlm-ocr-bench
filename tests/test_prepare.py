@@ -274,6 +274,8 @@ class TestPrepareCli:
         rp = RunPaths.for_run("r1")
         assert rp.manifest.exists()
         assert rp.config_resolved.exists()
+        resolved_cfg = yaml.safe_load(rp.config_resolved.read_text(encoding="utf-8"))
+        assert set(resolved_cfg) == {"run", "datasets"}  # no model settings
         assert rp.prepare_summary.exists()
 
         rows = list(read_rows(rp.manifest, ManifestRow))

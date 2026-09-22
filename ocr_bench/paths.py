@@ -54,6 +54,14 @@ class RunPaths:
         return self.root / "probe.json"
 
     @property
+    def probe_predictions(self) -> Path:
+        return self.root / "probe_predictions.jsonl"
+
+    @property
+    def config_infer(self) -> Path:
+        return self.root / "config.infer.yaml"
+
+    @property
     def config_resolved(self) -> Path:
         return self.root / "config.resolved.yaml"
 

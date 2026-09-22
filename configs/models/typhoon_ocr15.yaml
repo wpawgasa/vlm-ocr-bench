@@ -1,32 +1,55 @@
-# Prompts below are placeholders; task 3.4 replaces them with tuned prompts.
+# typhoon-ocr1.5-2b (Qwen3-VL based). It is trained on one prompt only ("will not work with
+# any other prompts"), used verbatim below for every native task. Images are resized so the
+# longest side is <= 1800 px (never upscaled). Policy table: openspec model-inference spec.
 endpoint_env: TYPHOON_BASE_URL
 served_model_name: typhoon
-default_parser: markdown
-prompts:
-  ocr_fullpage:
-    prompt: "Extract all text on this page in reading order as plain text."
-    version: "ocr_fullpage-v0"
-  ocr_line:
-    prompt: "Transcribe the text in this line or region exactly as written."
-    version: "ocr_line-v0"
-  handwriting:
-    prompt: "Transcribe the handwritten content on this page as plain text."
-    version: "handwriting-v0"
-  table:
-    prompt: "Extract the table on this page as an HTML table, preserving rows and cells."
-    version: "table-v0"
-  docparse:
-    prompt: "Parse this document page into reading-order text and note any tables or figures."
-    version: "docparse-v0"
-  kie:
-    prompt: "Extract the requested fields from this page as JSON, using null for any field that is absent."
-    version: "kie-v0"
-  kie_map:
-    prompt: "Extract the requested fields from this page as a JSON object mapping each field name to its value, using null for any field that is absent."
-    version: "kie_map-v0"
-  classify:
-    prompt: "Classify this document page and return its document type as plain text."
-    version: "classify-v0"
-  statement:
-    prompt: "Extract this bank statement page as JSON matching the statement schema: bank, account_no, account_name, period_start, period_end, opening_balance, closing_balance, and rows of date, description, debit, credit, balance."
-    version: "statement-v0"
+image_resize: max_side
+max_side: 1800
+sampling:
+  max_tokens: 10000
+  temperature: 0.0
+
+x-typhoon-prompt: &typhoon_prompt |-
+  Extract all text from the image.
+
+  Instructions:
+  - Only return the clean Markdown.
+  - Do not include any explanation or extra text.
+  - You must include all information on the page.
+
+  Formatting Rules:
+  - Tables: Render tables using <table>...</table> in clean HTML format.
+  - Equations: Render equations using LaTeX syntax with inline ($...$) and block ($$...$$).
+  - Images/Charts/Diagrams: Wrap any clearly defined visual areas (e.g. charts, diagrams, pictures) in:
+
+  <figure>
+  Describe the image's main elements (people, objects, text), note any contextual clues (place, event, culture), mention visible text and its meaning, provide deeper analysis when relevant (especially for financial charts, graphs, or documents), comment on style or architecture if relevant, then give a concise overall summary. Describe in Thai.
+  </figure>
+
+  - Page Numbers: Wrap page numbers in <page_number>...</page_number> (e.g., <page_number>14</page_number>).
+  - Checkboxes: Use ☐ for unchecked and ☑ for checked boxes.
+
+x-question: &question
+  kind: question
+  version: question-v1
+  parser: json_fields
+
+plans:
+  ocr_fullpage: &typhoon_plan
+    kind: single
+    version: typhoon-v1.5-v1
+    prompt: *typhoon_prompt
+    parser: typhoon_markdown
+  docparse: *typhoon_plan
+  statement: *typhoon_plan
+  table: *typhoon_plan
+  ocr_line: *typhoon_plan
+  handwriting: *typhoon_plan
+  "ocr_line@Fine-grained text recognition":
+    kind: crop_single
+    version: typhoon-v1.5-crop-v1
+    prompt: *typhoon_prompt
+    parser: typhoon_markdown
+  kie: *question
+  kie_map: *question
+  classify: *question

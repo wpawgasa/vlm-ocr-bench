@@ -12,7 +12,10 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
+from ocr_bench.schemas import PredictionRow
+
 T = TypeVar("T", bound=BaseModel)
+PredictionKey = tuple[str, str, str]  # (sample_id, condition, model)
 
 
 def read_rows(path: Path, model: type[T]) -> Iterator[T]:
@@ -59,3 +62,21 @@ def write_rows_atomic(path: Path, rows: Iterable[BaseModel]) -> int:
         os.fsync(fh.fileno())
     os.replace(tmp_path, path)
     return count
+
+
+def prediction_key(row: PredictionRow) -> PredictionKey:
+    return (row.sample_id, row.condition.value, row.model)
+
+
+def latest_predictions(path: Path) -> dict[PredictionKey, PredictionRow]:
+    """The last row per `(sample_id, condition, model)` in `path` (empty if it is missing).
+
+    `infer` appends a retried row after the errored one it supersedes, so readers must
+    take the last row per key.
+    """
+    latest: dict[PredictionKey, PredictionRow] = {}
+    if not path.exists():
+        return latest
+    for row in read_rows(path, PredictionRow):
+        latest[prediction_key(row)] = row
+    return latest

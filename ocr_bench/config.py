@@ -1,19 +1,82 @@
 """Configuration models and loader for `run.yaml` + `models/*.yaml` + `datasets/*.yaml`."""
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
 from ocr_bench.schemas import Condition, Task
 
 
-class PromptSpec(BaseModel):
+class Sampling(BaseModel):
+    """Decoding parameters of one request type. `top_k`, `repetition_penalty` and
+    `vllm_xargs` are vLLM extensions sent through `extra_body`."""
+
     model_config = ConfigDict(extra="forbid")
 
-    prompt: str
+    max_tokens: int = 4096
+    temperature: float = 0.0
+    top_p: float | None = None
+    top_k: int | None = None
+    presence_penalty: float = 0.0
+    frequency_penalty: float = 0.0
+    repetition_penalty: float | None = None
+    vllm_xargs: dict[str, Any] = Field(default_factory=dict)
+
+
+class TwoStage(BaseModel):
+    """TeleOCR's official decoupled pipeline: one layout call, then one call per block."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    layout_prompt: str
+    layout_size: tuple[int, int] = (1036, 1036)
+    layout_sampling: Sampling
+    block_prompts: dict[str, str]
+    block_sampling: dict[str, Sampling]
+    skip_types: list[str]
+    min_edge: int = 28
+    max_edge_ratio: float = 50
+    max_pixels: int = 64_000_000
+    block_concurrency: int = 8
+
+    @model_validator(mode="after")
+    def _check_defaults(self) -> "TwoStage":
+        if "default" not in self.block_prompts:
+            raise ValueError("two_stage.block_prompts must contain 'default'")
+        if "default" not in self.block_sampling:
+            raise ValueError("two_stage.block_sampling must contain 'default'")
+        return self
+
+
+PlanKind = Literal["single", "crop_single", "grounding", "two_stage", "question"]
+
+
+class RequestPlan(BaseModel):
+    """How one model handles one (task, subtask): request shape, prompt, parser, version."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: PlanKind
     version: str
+    prompt: str | None = None
+    parser: str
+    sampling: Sampling | None = None
+    two_stage: TwoStage | None = None
+
+    @model_validator(mode="after")
+    def _check_shape(self) -> "RequestPlan":
+        if (self.kind == "two_stage") != (self.two_stage is not None):
+            raise ValueError("`two_stage` must be set if and only if kind is 'two_stage'")
+        if self.kind in ("single", "crop_single", "grounding") and not self.prompt:
+            raise ValueError(f"plan kind '{self.kind}' requires a prompt")
+        return self
+
+
+# Plans are keyed by task, or by "task@subtask" to override one subtask.
+FINE_GRAINED_PLAN_KEY = "ocr_line@Fine-grained text recognition"
+REQUIRED_PLAN_KEYS = [t.value for t in Task] + [FINE_GRAINED_PLAN_KEY]
 
 
 class ModelConfig(BaseModel):
@@ -22,9 +85,39 @@ class ModelConfig(BaseModel):
     name: str
     endpoint_env: str
     served_model_name: str
-    default_parser: str
-    parsers: dict[Task, str] = Field(default_factory=dict)
-    prompts: dict[Task, PromptSpec]
+    system_prompt: str | None = None
+    message_prefix: str = ""
+    sampling: Sampling = Field(default_factory=Sampling)
+    image_resize: Literal["none", "smart_resize", "max_side"] = "none"
+    max_pixels: int | None = None
+    max_side: int | None = None
+    plans: dict[str, RequestPlan]
+
+    @model_validator(mode="after")
+    def _check_plans(self) -> "ModelConfig":
+        task_values = {t.value for t in Task}
+        for key in self.plans:
+            if key.split("@", 1)[0] not in task_values:
+                raise ValueError(f"plan key '{key}' does not name a task")
+        missing = [k for k in REQUIRED_PLAN_KEYS if k not in self.plans]
+        if missing:
+            raise ValueError(f"model '{self.name}' has no plan for: {missing}")
+        if self.image_resize == "smart_resize" and self.max_pixels is None:
+            raise ValueError("image_resize 'smart_resize' requires max_pixels")
+        if self.image_resize == "max_side" and self.max_side is None:
+            raise ValueError("image_resize 'max_side' requires max_side")
+        return self
+
+    def plan_for(self, task: Task | str, subtask: str | None) -> RequestPlan:
+        task_value = Task(task).value
+        if subtask is not None:
+            plan = self.plans.get(f"{task_value}@{subtask}")
+            if plan is not None:
+                return plan
+        try:
+            return self.plans[task_value]
+        except KeyError as exc:  # pragma: no cover — the validator guarantees coverage
+            raise ConfigError(f"model '{self.name}' has no plan for {task_value}") from exc
 
 
 class TaskSpec(BaseModel):
@@ -119,6 +212,14 @@ class ResolvedConfig(BaseModel):
             allow_unicode=True,
         )
 
+    def to_prepare_yaml(self) -> str:
+        """The `config.resolved.yaml` written by `prepare`: run and datasets, no models."""
+        return yaml.safe_dump(
+            self.model_dump(mode="json", include={"run", "datasets"}),
+            sort_keys=False,
+            allow_unicode=True,
+        )
+
 
 class ConfigError(ValueError):
     pass
@@ -127,6 +228,20 @@ class ConfigError(ValueError):
 def _load_yaml(path: Path) -> dict:
     with open(path, encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
+
+
+def load_model_config(path: Path, name: str) -> ModelConfig:
+    """Load and validate one `models/<name>.yaml`; raises `ConfigError` naming the file."""
+    if not path.exists():
+        raise ConfigError(f"model '{name}' has no config at {path}")
+    data = _load_yaml(path)
+    # Top-level `x-*` keys only hold YAML anchors (as in docker compose files).
+    data = {k: v for k, v in data.items() if not str(k).startswith("x-")}
+    data["name"] = name
+    try:
+        return ModelConfig.model_validate(data)
+    except ValidationError as exc:
+        raise ConfigError(f"{path}: {exc}") from exc
 
 
 def load_config(run_yaml: Path) -> ResolvedConfig:
@@ -144,12 +259,7 @@ def load_config(run_yaml: Path) -> ResolvedConfig:
         path = root / "models" / f"{m}.yaml"
         if not path.exists():
             raise ConfigError(f"model '{m}' has no config at {path}")
-        data = _load_yaml(path)
-        data["name"] = m
-        try:
-            models[m] = ModelConfig.model_validate(data)
-        except ValidationError as exc:
-            raise ConfigError(f"{path}: {exc}") from exc
+        models[m] = load_model_config(path, m)
 
     datasets: dict[str, DatasetConfig] = {}
     for d in run_config.datasets:

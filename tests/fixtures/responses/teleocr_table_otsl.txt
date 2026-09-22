@@ -1,0 +1,1 @@
+<fcel>วันที่<fcel>รายการ<fcel>ยอด<nl><fcel>01/03<fcel>ฝาก<fcel>1,000.00<nl><fcel>รวม<lcel><fcel>1,000.00<nl>

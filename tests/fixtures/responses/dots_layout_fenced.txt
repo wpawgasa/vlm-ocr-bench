@@ -1,0 +1,9 @@
+```json
+[{"bbox": [40, 20, 560, 60], "category": "Page-header", "text": "ธนาคารกสิกรไทย"},
+{"bbox": [40, 80, 400, 120], "category": "Title", "text": "# รายการเดินบัญชี"},
+{"bbox": [40, 130, 560, 170], "category": "Text", "text": "เลขที่บัญชี 123-4-56789-0"},
+{"bbox": [40, 180, 560, 400], "category": "Table", "text": "<table><thead><tr><th>วันที่</th><th>รายการ</th><th>ยอดคงเหลือ</th></tr></thead><tbody><tr><td>01/03/2568</td><td>ฝากเงิน</td><td>1,000.00</td></tr><tr><td colspan=\"2\">รวม</td><td>1,000.00</td></tr></tbody></table>"},
+{"bbox": [420, 80, 560, 120], "category": "Picture"},
+{"bbox": [40, 410, 560, 440], "category": "Formula", "text": "$$a+b$$"},
+{"bbox": [260, 760, 340, 780], "category": "Page-footer", "text": "หน้า 1/2"}]
+```

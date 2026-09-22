@@ -1,0 +1,13 @@
+<box:100 50 900 100><label:Header><rotate_up>
+<box:100 120 900 200><label:text><rotate_up>
+<box:100 220 900 500><label:table><rotate_up>
+<box:100 520 300 600 250 700 50 600><label:seal><rotate_up>
+<box:600 520 900 700><label:image><rotate_up>
+<box:100 720 900 780><label:list><rotate_up>
+<box:700 800 760 980><label:text><rotate_right>
+<box:100 900 500 950><label:equation><rotate_up>
+<box:450 960 550 990><label:page_number><rotate_up>
+<box:100 100 1200 200><label:text><rotate_up>
+<box:100 100 200><label:text><rotate_up>
+<box:10 10 20 20><label:banana><rotate_up>
+this line is not a block

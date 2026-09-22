@@ -1,32 +1,61 @@
-# Prompts below are placeholders; task 3.4 replaces them with tuned prompts.
+# dots.ocr. Prompts are verbatim from github.com/rednote-hilab/dots.ocr dots_ocr/utils/prompts.py.
+# Images are pre-resized with Qwen2-VL smart_resize (factor 28, min_pixels 3136) using
+# max_pixels 4,000,000 instead of upstream 11,289,600, so image tokens plus output fit in
+# --max-model-len 16384. Upstream samples at temperature 0.1; the spec mandates 0.
+# Policy table: openspec model-inference spec.
 endpoint_env: DOTSOCR_BASE_URL
 served_model_name: dotsocr
-default_parser: dots_layout_json
-prompts:
-  ocr_fullpage:
-    prompt: "Extract all text on this page in reading order as plain text."
-    version: "ocr_fullpage-v0"
-  ocr_line:
-    prompt: "Transcribe the text in this line or region exactly as written."
-    version: "ocr_line-v0"
-  handwriting:
-    prompt: "Transcribe the handwritten content on this page as plain text."
-    version: "handwriting-v0"
-  table:
-    prompt: "Extract the table on this page as an HTML table, preserving rows and cells."
-    version: "table-v0"
-  docparse:
-    prompt: "Parse this document page into reading-order text and note any tables or figures."
-    version: "docparse-v0"
-  kie:
-    prompt: "Extract the requested fields from this page as JSON, using null for any field that is absent."
-    version: "kie-v0"
-  kie_map:
-    prompt: "Extract the requested fields from this page as a JSON object mapping each field name to its value, using null for any field that is absent."
-    version: "kie_map-v0"
-  classify:
-    prompt: "Classify this document page and return its document type as plain text."
-    version: "classify-v0"
-  statement:
-    prompt: "Extract this bank statement page as JSON matching the statement schema: bank, account_no, account_name, period_start, period_end, opening_balance, closing_balance, and rows of date, description, debit, credit, balance."
-    version: "statement-v0"
+message_prefix: "<|img|><|imgpad|><|endofimg|>"
+image_resize: smart_resize
+max_pixels: 4000000
+sampling:
+  max_tokens: 8192
+  temperature: 0.0
+
+x-layout-prompt: &prompt_layout_all_en |
+  Please output the layout information from the PDF image, including each layout element's bbox, its category, and the corresponding text content within the bbox.
+
+  1. Bbox format: [x1, y1, x2, y2]
+
+  2. Layout Categories: The possible categories are ['Caption', 'Footnote', 'Formula', 'List-item', 'Page-footer', 'Page-header', 'Picture', 'Section-header', 'Table', 'Text', 'Title'].
+
+  3. Text Extraction & Formatting Rules:
+      - Picture: For the 'Picture' category, the text field should be omitted.
+      - Formula: Format its text as LaTeX.
+      - Table: Format its text as HTML.
+      - All Others (Text, Title, etc.): Format their text as Markdown.
+
+  4. Constraints:
+      - The output text must be the original text from the image, with no translation.
+      - All layout elements must be sorted according to human reading order.
+
+  5. Final Output: The entire output must be a single JSON object.
+
+x-question: &question
+  kind: question
+  version: question-v1
+  parser: json_fields
+
+plans:
+  ocr_fullpage: &layout_plan
+    kind: single
+    version: dots-layout-all-v1
+    prompt: *prompt_layout_all_en
+    parser: dots_layout_json
+  docparse: *layout_plan
+  statement: *layout_plan
+  table: *layout_plan
+  ocr_line: &ocr_plan
+    kind: single
+    version: dots-ocr-v1
+    prompt: "Extract the text content from this image."
+    parser: markdown
+  handwriting: *ocr_plan
+  "ocr_line@Fine-grained text recognition":
+    kind: grounding
+    version: dots-grounding-ocr-v1
+    prompt: "Extract text from the given bounding box on the image (format: [x1, y1, x2, y2]).\nBounding Box:\n"
+    parser: markdown
+  kie: *question
+  kie_map: *question
+  classify: *question

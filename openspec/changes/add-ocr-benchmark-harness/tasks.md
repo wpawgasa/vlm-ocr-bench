@@ -21,14 +21,15 @@
 
 ## 3. M2 Inference
 
-- [ ] 3.1 Implement `models/vllm_client.py` (AsyncOpenAI, base64 image, `temperature=0/seed=0/max_tokens=4096/logprobs`, semaphore concurrency, 120 s timeout + 1 retry, error rows, timing, health check); verify with a fake async server fixture covering success, one timeout then success, double timeout, and missing logprobs
-- [ ] 3.2 Implement `models/base.py` `OcrModel` protocol and the prompt registry with version tags (KIE prompts include the field list and request JSON with nulls); verify a test asserts the KIE prompt contains the sample's fields and the prediction carries `prompt_version`
-- [ ] 3.3 Implement `models/parsers.py` (`markdown`, `html_table`, `json_fields`, `dots_layout_json`) returning `NormalizedPage` with `parse_error` on failure; verify with recorded responses in `tests/fixtures/responses/`
-- [ ] 3.4 Implement `teleocr.py`, `dotsocr.py`, `typhoon.py` adapters and fill per-task prompts in model YAMLs; verify adapter tests on recorded responses for each task
-- [ ] 3.5 Wire `ocrbench infer` (resume on existing non-error rows, per-model error-rate summary, non-zero exit on row-count mismatch); verify an interruption/resume test with the fake client
-- [ ] 3.6 Implement `ocrbench probe` (5 fixed statement pages → yes/partial/no matrix + evidence ids → `probe.json`); verify with recorded responses
-- [ ] 3.7 Smoke-test live on the V100 box (`COMPOSE_EXTRA=.devcontainer/compose.v100.yaml scripts/serve_dotsocr.sh up`) with `pytest -m live` on 5 pages; verify predictions include logprobs and latency
-- [ ] 3.8 Run full `infer` for teleocr and dotsocr on the H100; verify zero silent drops (row counts match) and error rate < 2%, and run `probe`
+- [x] 3.1 Implement `models/vllm_client.py` (AsyncOpenAI, base64 image, `temperature=0/seed=0/max_tokens=4096/logprobs`, semaphore concurrency, 120 s timeout + 1 retry, error rows, timing, health check); verify with a fake async server fixture covering success, one timeout then success, double timeout, and missing logprobs
+- [x] 3.2 Implement `models/base.py` `OcrModel` protocol and the per-model request-plan registry (`single`, `crop_single`, `grounding`, `two_stage`, `question`) keyed by `(task, subtask)` per the model-inference policy table, with version tags and official per-model decoding settings; verify tests that `kie` sends the benchmark question verbatim, `ocr_fullpage` on dots.ocr uses `prompt_layout_all_en`, fine-grained regions are parsed from 0–1000 question coordinates, and predictions carry `prompt_version`
+- [x] 3.3 Implement `models/parsers.py` (`markdown`, `html_table`, `json_fields`, `dots_layout_json`, `teleocr_layout`, `otsl_to_html` with spans, `typhoon_markdown`) returning `NormalizedPage` with `parse_error` on failure; verify with recorded responses in `tests/fixtures/responses/` and the OTSL merged-cell spec scenario
+- [x] 3.4 Implement `teleocr.py` (official two-stage: 1036×1036 layout → polygon/rect crops, angle rotation, `resize_by_need`, per-type prompts and sampling; one prediction row with summed tokens, page wall-clock latency, `n_requests`, partial block failures noted), `dotsocr.py` and `typhoon.py` adapters, and fill request plans in model YAMLs from the official prompts; verify adapter tests on recorded responses for each task, incl. the two-stage and partial-failure spec scenarios
+- [x] 3.5 Wire `ocrbench infer` (resume on existing non-error rows, per-model error-rate summary, non-zero exit on row-count mismatch); verify an interruption/resume test with the fake client
+- [x] 3.6 Implement `ocrbench probe` (5 fixed statement pages → yes/partial/no matrix + evidence ids → `probe.json`); verify with recorded responses
+- [x] 3.7 Add `.devcontainer/teleocr-vllm.Dockerfile` (`FROM ${VLLM_IMAGE}` + pinned `TeleOCR_vllm` plugin) and point the compose `teleocr` service at it; verify `scripts/serve_teleocr.sh up` becomes healthy and a request with `no_repeat_ngram_size` is accepted
+- [ ] 3.8 Smoke-test live on the V100 box (`COMPOSE_EXTRA=.devcontainer/compose.v100.yaml scripts/serve_dotsocr.sh up`) with `pytest -m live` on 5 pages; verify predictions include logprobs and latency — PARTIAL (2026-09-22): TeleOCR verified end to end (two-stage n_requests up to 14, OTSL tables, logprobs, page latency, partial-block and error rows); dots.ocr could not be served stably on sm_70 (vLLM 0.11 FlexAttention crash), so its live path is verified in 3.9 on the H100
+- [ ] 3.9 Run full `infer` for teleocr and dotsocr on the H100; verify zero silent drops (row counts match) and error rate < 2%, and run `probe`
 
 ## 4. M3 Normalization and scoring
 
@@ -43,7 +44,7 @@
 
 ## 5. M4 Statement evaluation
 
-- [ ] 5.1 Implement `normalize/statement.py` (StatementPage from parsed output, merge pages → StatementFile with source page tags); verify a 4-page merge test
+- [ ] 5.1 Implement `normalize/statement.py`: rule-based, model-independent mapper from a full-page layout parse (`NormalizedPage.tables` HTML + text blocks) to `StatementPage` (header fields, rows via column-header matching in Thai/English), and merge pages → StatementFile with source page tags; verify a 4-page merge test and the model-independent-mapping scenario
 - [ ] 5.2 Implement Check A: per-bank row regex layouts in `bankstmt.yaml`, header field + page CER scoring, `row_f1` on (date, amount), n/a marking for banks without a layout; verify on the generated digital PDF fixture
 - [ ] 5.3 Implement `metrics/arithmetic.py` (Decimal balance equation, totals, closing balance, `first_break_row`, cross-page `page_gap`, `balance_mismatch`/`total_mismatch` flags, `row_consistency_rate`, `file_reconciles`); verify consistent, broken-row-7 and page-gap scenarios
 - [ ] 5.4 Implement Check C cross-model agreement (null when one side missing) and agreement-rate reporting; verify the missing-in-one-model scenario

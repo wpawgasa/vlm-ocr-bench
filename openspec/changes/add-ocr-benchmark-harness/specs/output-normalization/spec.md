@@ -54,9 +54,20 @@ Unparseable values SHALL be kept as canonical text and flagged. They SHALL NOT b
 - **WHEN** the account number "123-4-56789-0" is normalized
 - **THEN** the value is "1234567890"
 
+### Requirement: Table format conversion
+Tables SHALL be represented as HTML before scoring, whatever form the model emitted them in. OTSL output (TeleOCR) SHALL be converted to HTML, preserving row and column spans. Markdown pipe tables SHALL be converted to HTML.
+
+#### Scenario: OTSL with a merged cell
+- **WHEN** TeleOCR emits `<fcel>A<lcel><nl><fcel>1<fcel>2<nl>`
+- **THEN** the normalized table is HTML whose first row has one cell `A` with `colspan="2"`, followed by a row with cells `1` and `2`
+
 ### Requirement: Statement table construction
-For the `statement` task, the parsed output SHALL be converted into a statement page with these fields: bank, account number, account name, period start/end, opening/closing balance, page number, and rows. Each row has date, description, debit, credit, balance, and optional channel and bbox. Pages of one file SHALL be merged into a statement file in page order.
+For the `statement` task, no model SHALL be asked for a statement schema. The statement page SHALL be derived from the model's full-page layout parse, using its table blocks (as HTML) and text blocks, by one rule-based mapper shared by all models. The derived statement page has these fields: bank, account number, account name, period start/end, opening/closing balance, page number, and rows. Each row has date, description, debit, credit, balance, and optional channel and bbox. Pages of one file SHALL be merged into a statement file in page order.
 
 #### Scenario: Merge pages
 - **WHEN** a 4-page statement is normalized
 - **THEN** a single statement file is produced whose rows are the concatenation of page rows in page order, each row tagged with its source page
+
+#### Scenario: Model-independent mapping
+- **WHEN** two models produce the same table HTML and text blocks for a page
+- **THEN** the derived statement pages are identical

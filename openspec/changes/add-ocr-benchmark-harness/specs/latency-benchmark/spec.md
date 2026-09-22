@@ -11,14 +11,18 @@ Measures per-page latency and throughput of each served model on each GPU type a
 
 #### Scenario: Sweep coverage
 - **WHEN** `bench-latency --gpu h100 --concurrency 1,4,8,16,32` completes for two models
-- **THEN** `latency.jsonl` has 200 non-warm-up request rows for each (model, gpu, concurrency)
+- **THEN** `latency.jsonl` has 200 non-warm-up page rows for each (model, gpu, concurrency)
 
-### Requirement: Per-request timing record
-Each request row SHALL record `model`, `gpu`, `concurrency`, `sample_id`, end-to-end `latency_ms`, `ttft_ms`, `prompt_tokens`, `completion_tokens`, `image_px` and `error`.
+### Requirement: Per-page timing record
+Each timing row SHALL describe one page: `model`, `gpu`, `concurrency`, `sample_id`, end-to-end `latency_ms`, `ttft_ms`, `n_requests`, `prompt_tokens`, `completion_tokens`, `image_px` and `error`. For a multi-request page (TeleOCR two-stage), `latency_ms` SHALL cover all its requests and `ttft_ms` SHALL be taken from its first request. Client concurrency SHALL count pages in flight.
 
 #### Scenario: Streaming TTFT
-- **WHEN** a request completes
-- **THEN** `ttft_ms` is the time to the first streamed token and is ≤ `latency_ms`
+- **WHEN** a page completes
+- **THEN** `ttft_ms` is the time to the first streamed token of its first request and is ≤ `latency_ms`
+
+#### Scenario: Two-stage page timing
+- **WHEN** a TeleOCR page needs 1 layout request and 5 block requests
+- **THEN** its row has `n_requests=6` and `latency_ms` spans from the first request's start to the last request's end
 
 ### Requirement: Throughput summary and GPU memory
 For each (model, gpu, concurrency), the system SHALL report:

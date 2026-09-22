@@ -26,11 +26,11 @@ Every stage SHALL read its inputs from and write its outputs to `runs/<run_id>/`
 - **THEN** the command exits non-zero with a message naming the missing file and the stage that produces it
 
 ### Requirement: Declarative run configuration
-The system SHALL read which models, datasets and conditions to run from `configs/run.yaml`. Model settings (endpoint env var, served model name, per-task prompts with version tags, output parser) SHALL come from `configs/models/<model>.yaml`. Dataset settings (subset filters, caps, seed, bank layouts, degradation profiles) SHALL come from `configs/datasets/<dataset>.yaml`. The resolved configuration SHALL be copied into `runs/<run_id>/config.resolved.yaml` when `prepare` runs.
+The system SHALL read which models, datasets and conditions to run from `configs/run.yaml`. Model settings (endpoint env var, served model name, per-task prompts with version tags, output parser) SHALL come from `configs/models/<model>.yaml`. Dataset settings (subset filters, caps, seed, bank layouts, degradation profiles) SHALL come from `configs/datasets/<dataset>.yaml`. When `prepare` runs, the resolved run and dataset settings SHALL be written to `runs/<run_id>/config.resolved.yaml`. When `infer` runs, the resolved settings of the models it used SHALL be written to `runs/<run_id>/config.infer.yaml`. Keeping them separate means a model-config change never invalidates prepared data.
 
 #### Scenario: Resolved config snapshot
 - **WHEN** `ocrbench prepare --config configs/run.yaml --run-id R` completes
-- **THEN** `runs/R/config.resolved.yaml` exists and contains the model, dataset and condition settings actually used
+- **THEN** `runs/R/config.resolved.yaml` exists and contains the run, dataset and condition settings actually used, and no model settings
 
 #### Scenario: Invalid configuration
 - **WHEN** `configs/run.yaml` names a model with no matching `configs/models/<model>.yaml`

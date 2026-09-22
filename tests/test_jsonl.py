@@ -140,3 +140,34 @@ def test_append_rows_flushes_and_fsyncs(tmp_path):
         content = fh.read()
     assert os.fsync  # sanity: module available
     assert b"s1" in content
+
+
+def test_latest_predictions_last_row_per_key_wins(tmp_path):
+    from ocr_bench.jsonl import latest_predictions
+    from ocr_bench.schemas import Condition, NormalizedPage, PredictionRow, RawPrediction
+
+    def pred(sample_id, model, error=None, condition=Condition.clean):
+        return PredictionRow(
+            sample_id=sample_id,
+            condition=condition,
+            model=model,
+            prompt_version="v1",
+            raw=RawPrediction(error=error),
+            normalized=NormalizedPage(),
+            latency_ms=1.0,
+            prompt_tokens=0,
+            completion_tokens=0,
+        )
+
+    path = tmp_path / "predictions.jsonl"
+    assert latest_predictions(path) == {}
+    append_rows(path, [pred("a", "m", error="timeout"), pred("b", "m"), pred("a", "n")])
+    append_rows(path, [pred("a", "m"), pred("a", "m", condition=Condition.photo)])
+    latest = latest_predictions(path)
+    assert set(latest) == {
+        ("a", "clean", "m"),
+        ("b", "clean", "m"),
+        ("a", "clean", "n"),
+        ("a", "photo", "m"),
+    }
+    assert latest[("a", "clean", "m")].raw.error is None

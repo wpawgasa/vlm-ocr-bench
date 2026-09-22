@@ -62,6 +62,14 @@ services:
 
   teleocr:
     <<: *vllm
+    # Stock vLLM + TeleOCR's plugin and no-repeat-ngram logits processor (design D14).
+    # Tag = TeleOCR plugin commit; bump together with TELEOCR_COMMIT in the Dockerfile.
+    image: ocr-bench/teleocr-vllm:9921cff
+    build:
+      context: .
+      dockerfile: teleocr-vllm.Dockerfile
+      args:
+        VLLM_IMAGE: ${VLLM_IMAGE:-vllm/vllm-openai:v0.11.0}
     profiles: ["serve"]
     ports: ["${TELEOCR_PORT:-8001}:8000"]
     environment:
@@ -70,6 +78,7 @@ services:
     command:
       - '--model=StarDoc-AI/TeleOCR'
       - '--served-model-name=teleocr'
+      - '--logits-processors=teleocr_no_repeat_ngram:VllmV1NoRepeatNGramLogitsProcessor'
       - '--trust-remote-code'
       - '--dtype=${VLLM_DTYPE:-bfloat16}'
       - '--max-model-len=16384'

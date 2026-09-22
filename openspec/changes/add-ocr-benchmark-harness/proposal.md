@@ -18,7 +18,7 @@ This change turns that spec into a working, reproducible pipeline.
   - Ingest bank statements: route each file to digital, scanned or photo; rasterize at 200 dpi; use the PDF text layer as ground truth.
   - Apply three deterministic image degradations: `clean`, `scan_low` and `photo`.
   - Write a manifest with one row per `(sample, condition)`.
-- **Model adapters** for TeleOCR and dots.ocr, both called through vLLM OpenAI-compatible endpoints. Adapters use task-specific prompts with version tags, logprobs, a timeout with one retry, and explicit error rows (no silent drops). An optional third adapter covers `typhoon-ocr1.5-2b`. A capability probe fills the Q4 matrix.
+- **Model adapters** for TeleOCR and dots.ocr, both called through vLLM OpenAI-compatible endpoints. Adapters use each model's native prompts and pipelines (TeleOCR's two-stage layout-then-block parse), with the benchmark question as fallback where no native mode exists. Every request plan carries a version tag. Adapters record logprobs, use a timeout with one retry, and write explicit error rows (no silent drops). An optional third adapter covers `typhoon-ocr1.5-2b`. A capability probe fills the Q4 matrix.
 - **Normalization:**
   - Thai NFC text canonicalization.
   - Field rules: dates with Buddhist-year conversion, amounts, account numbers.
@@ -44,12 +44,12 @@ Non-goals: fine-tuning either model, building the LooLoo production pipeline, VQ
 
 - `bench-cli`: the `ocrbench` command set, run configuration (`configs/run.yaml`, model and dataset YAMLs) and the `runs/<run_id>/` layout that makes every stage re-runnable on its own.
 - `dataset-preparation`: the ThaiOCRBench subset loader, bank-statement ingestion, degradation conditions and the manifest schema.
-- `model-inference`: the OCR model adapter interface, the vLLM client rules (logprobs, timeout, retry, error rows), versioned prompts, predictions output and the capability probe.
+- `model-inference`: the OCR model adapter interface, the vLLM client rules (logprobs, timeout, retry, error rows), versioned per-task request plans (native prompts/pipelines with benchmark-question fallback), predictions output and the capability probe.
 - `output-normalization`: parsing raw model output into `NormalizedPage`, and the text/field/statement normalization shared by predictions and ground truth.
 - `accuracy-scoring`: the per-sample scorers, per-field results, slice aggregation and bootstrap confidence intervals.
 - `statement-evaluation`: the statement schema, checks A/B/C, the review queue and manual anchor set, and duplicate detection.
 - `confidence-calibration`: the field confidence proxy, calibration bands, ECE, threshold search and review rate.
-- `latency-benchmark`: the concurrency sweep, per-request timing, GPU memory sampling, throughput and cost derivation.
+- `latency-benchmark`: the concurrency sweep, per-page timing, GPU memory sampling, throughput and cost derivation.
 - `scorecard-report`: the question-mapped scorecard, xlsx/markdown/plots, the output contract with error flags, and the anonymizer.
 
 ### Modified Capabilities
@@ -60,7 +60,7 @@ Non-goals: fine-tuning either model, building the LooLoo production pipeline, VQ
 
 - **New code:** `pyproject.toml`, `ocr_bench/` (data, models, normalize, metrics, confidence, latency, report), `configs/`, `tests/`.
 - **Existing files:**
-  - `scripts/serve_{teleocr,dotsocr}.sh` and `.devcontainer/compose.yaml` already serve the models with the required vLLM flags. The harness only consumes `$TELEOCR_BASE_URL`, `$DOTSOCR_BASE_URL` and `$TYPHOON_BASE_URL`.
+  - `scripts/serve_{teleocr,dotsocr}.sh` and `.devcontainer/compose.yaml` already serve the models with the required vLLM flags; TeleOCR additionally needs its `TeleOCR_vllm` plugin in the serving image. The harness only consumes `$TELEOCR_BASE_URL`, `$DOTSOCR_BASE_URL` and `$TYPHOON_BASE_URL`.
   - `README.md` gains a reproduce section.
 - **Dependencies:**
   - Python packages: `typer`, `pydantic`, `httpx`/`openai`, `datasets`, `pdfplumber`, `pillow`, `opencv-python-headless`, `numpy`, `pythainlp`, `rapidfuzz`, `apted` or `zss`, `scikit-learn`, `imagehash`, `openpyxl`, `matplotlib`, `pytest`.
