@@ -1,0 +1,17 @@
+kind: bankstmt
+input_dir: /data/statements
+banks: [kbank, scb, bbl, ktb, krungsri, ttb, gsb]
+bank_map:
+  "*kbank*": kbank
+  "*kasikorn*": kbank
+  "*scb*": scb
+  "*bbl*": bbl
+  "*bangkok*": bbl
+  "*ktb*": ktb
+  "*krungthai*": ktb
+  "*krungsri*": krungsri
+  "*bay*": krungsri
+  "*ttb*": ttb
+  "*gsb*": gsb
+  "*omsin*": gsb
+layouts: {}  # per-bank row regex layouts, filled in task 5.2

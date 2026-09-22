@@ -2,13 +2,13 @@
 
 ## 1. M0 Scaffold
 
-- [ ] 1.1 Create `pyproject.toml` (Python 3.11, `ocrbench = ocr_bench.cli:app` entry point, runtime deps from design D4–D12, `dev` extra with pytest/ruff); verify `uv sync --all-extras` succeeds in the dev container
-- [ ] 1.2 Create package skeleton `ocr_bench/{data,models,normalize,metrics,confidence,latency,report}/__init__.py`, `configs/{models,datasets}/`, `tests/`; verify `python -c "import ocr_bench"` succeeds
-- [ ] 1.3 Implement `ocr_bench/schemas.py` with all row models from design D2 (incl. `GroundTruth` tagged union, `OutputField` with the `error_flags` enum); verify `tests/test_schemas.py` round-trips each model through JSON and rejects an unknown `gt_kind` and unknown error flag
-- [ ] 1.4 Implement `ocr_bench/jsonl.py` (typed read, append-and-flush, atomic write) and run-dir path helpers honoring `$OCRBENCH_DATA_DIR`; verify tests for append/resume and atomic replace
-- [ ] 1.5 Implement config models and loaders for `run.yaml`, `models/*.yaml`, `datasets/*.yaml` with a failure on an unknown model reference; add initial `configs/run.yaml`, `configs/models/{teleocr,dotsocr,typhoon_ocr15}.yaml`, `configs/datasets/{thaiocrbench,bankstmt}.yaml`; verify a config test loads them and rejects a bad model name
-- [ ] 1.6 Implement `ocr_bench/cli.py` with typer stubs for `prepare`, `infer`, `probe`, `score`, `calibrate`, `bench-latency`, `report` and a missing-upstream-file check helper; verify `ocrbench --help` lists all 7 commands (test via `typer.testing.CliRunner`)
-- [ ] 1.7 Add a CI workflow running `ruff check` and `pytest -m "not live"`; verify it passes locally with `uv run pytest`
+- [x] 1.1 Create `pyproject.toml` (Python 3.11, `ocrbench = ocr_bench.cli:app` entry point, runtime deps from design D4–D12, `dev` extra with pytest/ruff); verify `uv sync --all-extras` succeeds in the dev container
+- [x] 1.2 Create package skeleton `ocr_bench/{data,models,normalize,metrics,confidence,latency,report}/__init__.py`, `configs/{models,datasets}/`, `tests/`; verify `python -c "import ocr_bench"` succeeds
+- [x] 1.3 Implement `ocr_bench/schemas.py` with all row models from design D2 (incl. `GroundTruth` tagged union, `OutputField` with the `error_flags` enum); verify `tests/test_schemas.py` round-trips each model through JSON and rejects an unknown `gt_kind` and unknown error flag
+- [x] 1.4 Implement `ocr_bench/jsonl.py` (typed read, append-and-flush, atomic write) and run-dir path helpers honoring `$OCRBENCH_DATA_DIR`; verify tests for append/resume and atomic replace
+- [x] 1.5 Implement config models and loaders for `run.yaml`, `models/*.yaml`, `datasets/*.yaml` with a failure on an unknown model reference; add initial `configs/run.yaml`, `configs/models/{teleocr,dotsocr,typhoon_ocr15}.yaml`, `configs/datasets/{thaiocrbench,bankstmt}.yaml`; verify a config test loads them and rejects a bad model name
+- [x] 1.6 Implement `ocr_bench/cli.py` with typer stubs for `prepare`, `infer`, `probe`, `score`, `calibrate`, `bench-latency`, `report` and a missing-upstream-file check helper; verify `ocrbench --help` lists all 7 commands (test via `typer.testing.CliRunner`)
+- [x] 1.7 Add a CI workflow running `ruff check` and `pytest -m "not live"`; verify it passes locally with `uv run pytest`
 
 ## 2. M1 Data preparation
 

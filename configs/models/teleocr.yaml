@@ -1,0 +1,32 @@
+# Prompts below are placeholders; task 3.4 replaces them with tuned prompts.
+endpoint_env: TELEOCR_BASE_URL
+served_model_name: teleocr
+default_parser: markdown
+prompts:
+  ocr_fullpage:
+    prompt: "Extract all text on this page in reading order as plain text."
+    version: "ocr_fullpage-v0"
+  ocr_line:
+    prompt: "Transcribe the text in this line or region exactly as written."
+    version: "ocr_line-v0"
+  handwriting:
+    prompt: "Transcribe the handwritten content on this page as plain text."
+    version: "handwriting-v0"
+  table:
+    prompt: "Extract the table on this page as an HTML table, preserving rows and cells."
+    version: "table-v0"
+  docparse:
+    prompt: "Parse this document page into reading-order text and note any tables or figures."
+    version: "docparse-v0"
+  kie:
+    prompt: "Extract the requested fields from this page as JSON, using null for any field that is absent."
+    version: "kie-v0"
+  kie_map:
+    prompt: "Extract the requested fields from this page as a JSON object mapping each field name to its value, using null for any field that is absent."
+    version: "kie_map-v0"
+  classify:
+    prompt: "Classify this document page and return its document type as plain text."
+    version: "classify-v0"
+  statement:
+    prompt: "Extract this bank statement page as JSON matching the statement schema: bank, account_no, account_name, period_start, period_end, opening_balance, closing_balance, and rows of date, description, debit, credit, balance."
+    version: "statement-v0"

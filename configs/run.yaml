@@ -1,0 +1,9 @@
+# To run typhoon-ocr1.5-2b as an optional third reference model, add
+# "typhoon_ocr15" to the `models` list below (its config already exists at
+# configs/models/typhoon_ocr15.yaml).
+#
+# Fill gpu_hourly_rate with the rates used for the cost-per-1000-pages line,
+# e.g. gpu_hourly_rate: {h100: 0.0}.
+models: [teleocr, dotsocr]
+datasets: [thaiocrbench, bankstmt]
+gpu_hourly_rate: {}

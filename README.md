@@ -25,6 +25,14 @@ DOCKER_BUILDKIT=1 devcontainer up --workspace-folder .
 Per-host overrides (paths, GPU ids, ports, vLLM image tag, `HF_TOKEN`) go in `.devcontainer/.env`,
 see `.devcontainer/.env.example`.
 
+## Development
+
+```bash
+uv sync --all-extras   # install runtime + dev (pytest, ruff) deps into /home/vscode/.venv
+uv run pytest          # runs tests/ (live-server tests are skipped by default)
+uv run ocrbench --help # lists the prepare/infer/probe/score/calibrate/bench-latency/report stages
+```
+
 ## Model servers
 
 Defined in `.devcontainer/compose.yaml` under the `serve` profile (bf16, spec §4.3 flags):
