@@ -1,0 +1,23 @@
+kind: pipeline
+type: docker
+name: default
+
+steps:
+  - name: test
+    image: ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+    environment:
+      UV_LINK_MODE: copy
+    commands:
+      # poppler: pdffonts/pdftoppm/pdftotext for the bank-statement ingestion tests
+      - apt-get update && apt-get install -y --no-install-recommends poppler-utils
+      - uv sync --all-extras --frozen
+      - uv run ruff check .
+      - uv run ruff format --check .
+      - uv run pytest -m "not live"
+
+trigger:
+  branch:
+    - main
+  event:
+    - push
+    - pull_request
