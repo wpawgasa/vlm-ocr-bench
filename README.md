@@ -34,6 +34,7 @@ uv run ocrbench --help # lists the prepare/infer/probe/score/calibrate/bench-lat
 ocrbench prepare --config configs/run.yaml --run-id <id> [--datasets thaiocrbench]
 uv run ocrbench infer --run-id <id> [--models teleocr,dotsocr]
 uv run ocrbench score --run-id <id>  # scores/fields/aggregates/statements.jsonl + tob_parity.json
+uv run ocrbench calibrate --run-id <id> --target-acc 0.99,0.995  # calibration.jsonl, calibration_fields.jsonl, reliability.json, thresholds.json
 ```
 
 Statement-only stages (M4):

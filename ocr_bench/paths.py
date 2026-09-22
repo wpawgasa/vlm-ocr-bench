@@ -74,6 +74,14 @@ class RunPaths:
         return self.root / "calibration.jsonl"
 
     @property
+    def calibration_fields(self) -> Path:
+        return self.root / "calibration_fields.jsonl"
+
+    @property
+    def reliability(self) -> Path:
+        return self.root / "reliability.json"
+
+    @property
     def latency(self) -> Path:
         return self.root / "latency.jsonl"
 

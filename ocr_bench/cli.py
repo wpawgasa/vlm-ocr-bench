@@ -14,6 +14,7 @@ from pathlib import Path
 import typer
 import yaml
 
+from ocr_bench.confidence.calibrate import run_calibrate
 from ocr_bench.config import (
     BankOverrides,
     BankStmtConfig,
@@ -532,10 +533,29 @@ def calibrate(
         "0.99,0.995", "--target-acc", help="Comma-separated target accuracies."
     ),
 ) -> None:
-    """Fit confidence bands and accept/reject thresholds."""
+    """Fit confidence bands and accept/reject thresholds.
+
+    Writes calibration.jsonl, calibration_fields.jsonl, reliability.json and
+    thresholds.json.
+    """
     rp = RunPaths.for_run(run_id)
     _require_or_exit(rp.fields, "score")
-    _not_implemented("calibrate", "6.4")
+    _require_or_exit(rp.predictions, "infer")
+    targets = [float(t) for t in _csv(target_acc)]
+    run_cfg = _run_config_for(rp)
+    summary = run_calibrate(rp, targets, seed=run_cfg.seed, n_resamples=run_cfg.bootstrap_resamples)
+
+    typer.echo(f"calibrated {summary['n_records']} labelled fields")
+    for model, variants in summary["per_model"].items():
+        for variant, info in variants.items():
+            reviews = " ".join(
+                f"review@{t}={r['shares']['review']:.2f}"
+                f"{'' if r['reachable'] else ' (not reachable)'}"
+                for t, r in info["targets"].items()
+            )
+            typer.echo(f"{model}/{variant}: ece={info['ece']:.3f} {reviews}")
+        if not variants:
+            typer.echo(f"{model}: insufficient data for calibration")
 
 
 @app.command(name="bench-latency")

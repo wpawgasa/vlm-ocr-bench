@@ -345,6 +345,34 @@ class CalibrationRow(BaseModel):
     ci_low: float | None
     ci_high: float | None
     critical_only: bool = False
+    # M5 additions (task 6.3): `table` names which band table the row belongs to
+    # (`critical_only` is kept in sync with it for backward compatibility), and `ece` is
+    # that (model, variant, table)'s calibration error, repeated on every band row of the
+    # group since ECE is not itself a band statistic.
+    table: Literal["all", "critical"] = "all"
+    ece: float | None = None
+
+
+class CalibrationFieldRow(BaseModel):
+    """One labelled field's out-of-fold confidence and features (task 6.2),
+    written to `calibration_fields.jsonl`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sample_id: str
+    condition: Condition
+    model: str
+    variant: Literal["full", "logprob_only"]
+    field: str
+    is_critical: bool
+    label: int
+    conf: float | None
+    mean_logprob: float
+    min_logprob: float
+    span_found: bool
+    logprobs_missing: bool
+    agree: int | None
+    arith: int | None
 
 
 class LatencyRecord(BaseModel):

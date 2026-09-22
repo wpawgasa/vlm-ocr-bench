@@ -55,10 +55,10 @@
 
 ## 6. M5 Confidence calibration
 
-- [ ] 6.1 Implement `confidence/proxy.py` features (token-offset span location with exact then digit-only match, mean/min logprob, `span_found`, `agree`, `arith` with null indicators); verify the span-not-found scenario and a digit-only match case
-- [ ] 6.2 Implement `confidence/calibrate.py` logistic fit with `GroupKFold(5)` by `sample_id`, `full` and `logprob_only` variants, out-of-fold confidences; verify no sample_id crosses folds
-- [ ] 6.3 Implement bands (5 bands, n/accuracy/CI), ECE (10 bins), critical-only table and reliability plot data → `calibration.jsonl`; verify on a synthetic perfectly-calibrated fixture (ECE ≈ 0)
-- [ ] 6.4 Implement threshold search for `--target-acc` targets with "not reachable" handling, bucket shares/accuracies, and `thresholds.json` with weights; wire `ocrbench calibrate`; verify reproduction of bucket shares from `thresholds.json`
+- [x] 6.1 Implement `confidence/proxy.py` features (token-offset span location with exact then digit-only match, mean/min logprob, `span_found`, `agree`, `arith` with null indicators); verify the span-not-found scenario and a digit-only match case
+- [x] 6.2 Implement `confidence/calibrate.py` logistic fit with `GroupKFold(5)` by `sample_id`, `full` and `logprob_only` variants, out-of-fold confidences; verify no sample_id crosses folds
+- [x] 6.3 Implement bands (5 bands, n/accuracy/CI), ECE (10 bins), critical-only table and reliability plot data → `calibration.jsonl`; verify on a synthetic perfectly-calibrated fixture (ECE ≈ 0)
+- [x] 6.4 Implement threshold search for `--target-acc` targets with "not reachable" handling, bucket shares/accuracies, and `thresholds.json` with weights; wire `ocrbench calibrate`; verify reproduction of bucket shares from `thresholds.json`
 - [ ] 6.5 Run `calibrate --target-acc 0.99,0.995` on the H100 run; verify ECE and review rate are reported per model
 
 ## 7. M5 Latency benchmark
