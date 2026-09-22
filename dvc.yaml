@@ -14,12 +14,13 @@ vars:
 stages:
   prepare:
     cmd: OCRBENCH_DATA_DIR=data ocrbench prepare --run-id ${run_id} --force
+    # Only what shapes prepared data (design D3): model configs, prediction schemas and
+    # the CLI change every milestone and must not mark this 7 GB stage stale.
     deps:
-      - configs
+      - configs/run.yaml
+      - configs/datasets
       - data/statements
       - ocr_bench/data
-      - ocr_bench/config.py
-      - ocr_bench/schemas.py
     outs:
       - data/runs/${run_id}/img
       - data/runs/${run_id}/gt

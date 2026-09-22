@@ -3,34 +3,30 @@ stages:
   prepare:
     cmd: OCRBENCH_DATA_DIR=data ocrbench prepare --run-id 2026-09-22-a --force
     deps:
-    - path: configs
+    - path: configs/datasets
       hash: md5
-      md5: 096087d42da622709bc33353c83a44f1.dir
-      size: 6303
-      nfiles: 6
+      md5: cd17c1ae09c21d5c5c934f73d04275f7.dir
+      size: 1373
+      nfiles: 2
+    - path: configs/run.yaml
+      hash: md5
+      md5: dddd1480e8d2c22d737a7fd41b714f64
+      size: 380
     - path: data/statements
       hash: md5
       md5: c54d95d781c70338dfdd5466656470b8.dir
       size: 129018076
       nfiles: 31
-    - path: ocr_bench/config.py
-      hash: md5
-      md5: c62b25023ef06b07d9db5b7f2335c156
-      size: 4511
     - path: ocr_bench/data
       hash: md5
       md5: c04f083f319c4e130d48566d96cf963a.dir
       size: 31002
       nfiles: 6
-    - path: ocr_bench/schemas.py
-      hash: md5
-      md5: cc6b7288463d4fd8f3a181f6e4366047
-      size: 8492
     outs:
     - path: data/runs/2026-09-22-a/config.resolved.yaml
       hash: md5
-      md5: 91e1eff6849d54c7f96c98cc9170d3de
-      size: 5282
+      md5: a74edaa514fe2ca9b70eea807f369ba3
+      size: 1982
     - path: data/runs/2026-09-22-a/gt
       hash: md5
       md5: bda1e7ed1271ab8f3ebe22ee01a90575.dir
