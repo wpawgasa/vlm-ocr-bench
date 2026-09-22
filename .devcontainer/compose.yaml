@@ -1,0 +1,118 @@
+# ocr-bench stack.
+#
+#   dev      – harness container (VS Code attaches here). Always started.
+#   teleocr  – vLLM OpenAI server for StarDoc-AI/TeleOCR      (profile: serve)
+#   dotsocr  – vLLM OpenAI server for dots-studio/dots.ocr    (profile: serve)
+#   typhoon  – vLLM OpenAI server for typhoon-ocr1.5-2b       (profile: typhoon, optional 3rd reference)
+#
+# Start the model servers (from the host or from inside the dev container):
+#   docker compose -f .devcontainer/compose.yaml --profile serve up -d
+# or use scripts/serve_{teleocr,dotsocr}.sh.
+#
+# Host-specific values (GPU ids, ports, vLLM image, HF token) go in .devcontainer/.env,
+# see .env.example. Model servers default to bf16 on H100 (spec §8).
+
+name: ocr-bench
+
+x-vllm: &vllm
+  image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.11.0}
+  runtime: nvidia
+  ipc: host
+  restart: "no"
+  volumes:
+    # Host models dir = the HF cache, shared with the dev container so weights download once.
+    - ${MODELS_DIR:-${HOST_HOME:-${HOME}}/.cache/huggingface}:/root/.cache/huggingface
+  environment: &vllm-env
+    HF_TOKEN: ${HF_TOKEN:-}
+    NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    # Defaults target the H100 benchmark host. For a smoke test on an older driver
+    # (e.g. the V100 dev box) layer compose.v100.yaml on top.
+  healthcheck:
+    test: ["CMD", "curl", "-fs", "http://localhost:8000/health"]
+    interval: 15s
+    timeout: 5s
+    retries: 60
+    start_period: 60s
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sleep infinity
+    runtime: nvidia
+    environment:
+      # utility only: lets the latency harness sample `nvidia-smi` (spec §8) without
+      # giving the harness a CUDA context.
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: utility
+      HF_TOKEN: ${HF_TOKEN:-}
+      OCRBENCH_DATA_DIR: /data
+      TELEOCR_BASE_URL: http://teleocr:8000/v1
+      DOTSOCR_BASE_URL: http://dotsocr:8000/v1
+      TYPHOON_BASE_URL: http://typhoon:8000/v1
+    volumes:
+      - ..:/workspaces/vlm-ocr-bench:cached
+      # Host data dir: ThaiOCRBench exports, bank statements, runs/. Default is ./data in the repo
+      # (gitignored); point DATA_DIR elsewhere on the H100 host.
+      - ${DATA_DIR:-${HOST_WORKSPACE:-..}/data}:/data
+      - ${MODELS_DIR:-${HOST_HOME:-${HOME}}/.cache/huggingface}:/home/vscode/.cache/huggingface
+      - uv-cache:/home/vscode/.cache/uv
+      - venv:/home/vscode/.venv
+
+  teleocr:
+    <<: *vllm
+    profiles: ["serve"]
+    ports: ["${TELEOCR_PORT:-8001}:8000"]
+    environment:
+      <<: *vllm-env
+      NVIDIA_VISIBLE_DEVICES: ${TELEOCR_GPU:-0}
+    command:
+      - '--model=StarDoc-AI/TeleOCR'
+      - '--served-model-name=teleocr'
+      - '--trust-remote-code'
+      - '--dtype=${VLLM_DTYPE:-bfloat16}'
+      - '--max-model-len=16384'
+      - '--limit-mm-per-prompt={"image": 1}'
+      - '--gpu-memory-utilization=0.9'
+      - '--seed=0'
+      - '--max-logprobs=5'
+
+  dotsocr:
+    <<: *vllm
+    profiles: ["serve"]
+    ports: ["${DOTSOCR_PORT:-8002}:8000"]
+    environment:
+      <<: *vllm-env
+      NVIDIA_VISIBLE_DEVICES: ${DOTSOCR_GPU:-1}
+    command:
+      - '--model=dots-studio/dots.ocr'
+      - '--served-model-name=dotsocr'
+      - '--trust-remote-code'
+      - '--dtype=${VLLM_DTYPE:-bfloat16}'
+      - '--max-model-len=16384'
+      - '--limit-mm-per-prompt={"image": 1}'
+      - '--gpu-memory-utilization=0.9'
+      - '--seed=0'
+      - '--max-logprobs=5'
+
+  typhoon:
+    <<: *vllm
+    profiles: ["typhoon"]
+    ports: ["${TYPHOON_PORT:-8003}:8000"]
+    environment:
+      <<: *vllm-env
+      NVIDIA_VISIBLE_DEVICES: ${TYPHOON_GPU:-2}
+    command:
+      - '--model=typhoon-ai/typhoon-ocr1.5-2b'
+      - '--served-model-name=typhoon'
+      - '--dtype=${VLLM_DTYPE:-bfloat16}'
+      - '--max-model-len=16384'
+      - '--limit-mm-per-prompt={"image": 1}'
+      - '--gpu-memory-utilization=0.9'
+      - '--seed=0'
+      - '--max-logprobs=5'
+
+volumes:
+  uv-cache:
+  venv:

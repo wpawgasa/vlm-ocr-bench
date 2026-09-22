@@ -1,0 +1,63 @@
+{
+  "name": "ocr-bench (TeleOCR vs dots.ocr)",
+  "dockerComposeFile": ["compose.yaml"],
+  "service": "dev",
+  // Model servers (profile "serve") are started on demand, see scripts/serve_*.sh.
+  "runServices": ["dev"],
+  "workspaceFolder": "/workspaces/vlm-ocr-bench",
+  "remoteUser": "vscode",
+  "shutdownAction": "stopCompose",
+
+  "features": {
+    // Lets scripts/serve_*.sh start/stop the vLLM containers from inside the dev container.
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+    // Node LTS for the OpenSpec CLI (installed globally in post-create.sh).
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" }
+  },
+
+  "containerEnv": {
+    // compose run from inside the container (docker-outside-of-docker) must join the same
+    // project/network and resolve bind mounts against host paths. DATA_DIR / MODELS_DIR in
+    // .devcontainer/.env still take precedence over these fallbacks.
+    "COMPOSE_PROJECT_NAME": "ocr-bench",
+    "HOST_HOME": "${localEnv:HOME}",
+    "HOST_WORKSPACE": "${localWorkspaceFolder}"
+  },
+
+  // Runs on the host: create bind-mount sources so Docker does not create them root-owned.
+  "initializeCommand": "mkdir -p data \"$HOME/.cache/huggingface\"",
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  "forwardPorts": [8001, 8002, 8003],
+  "portsAttributes": {
+    "8001": { "label": "vLLM TeleOCR", "onAutoForward": "silent" },
+    "8002": { "label": "vLLM dots.ocr", "onAutoForward": "silent" },
+    "8003": { "label": "vLLM typhoon-ocr", "onAutoForward": "silent" }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "ms-toolsai.jupyter",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml",
+        "mechatroner.rainbow-csv"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/home/vscode/.venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests"],
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true
+        },
+        "files.exclude": { "**/__pycache__": true, "**/.pytest_cache": true },
+        "search.exclude": { "runs/**": true, "data/**": true }
+      }
+    }
+  }
+}

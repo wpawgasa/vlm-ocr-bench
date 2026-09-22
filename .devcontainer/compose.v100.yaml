@@ -1,0 +1,48 @@
+# OPTIONAL — only for smoke-testing the vLLM servers on the V100 dev box (driver 535 / CUDA 12.2).
+# Real benchmark numbers come from H100; do not quote anything measured with this override.
+#
+#   docker compose -f .devcontainer/compose.yaml -f .devcontainer/compose.v100.yaml --profile serve up -d
+#
+# - V100 (sm_70) has no bf16 -> fp16. Qwen2.5-VL-based models may overflow in fp16.
+# - vLLM images need CUDA >= 12.8; the 535 driver only works via the forward-compat libs in the image.
+# - vLLM >= 0.20 dropped sm_70; keep VLLM_IMAGE at an older tag.
+x-v100-env: &v100-env
+  NVIDIA_DISABLE_REQUIRE: "1"
+  LD_LIBRARY_PATH: /usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+
+services:
+  teleocr:
+    environment: *v100-env
+    command:
+      - '--model=StarDoc-AI/TeleOCR'
+      - '--served-model-name=teleocr'
+      - '--trust-remote-code'
+      - '--dtype=half'
+      - '--max-model-len=16384'
+      - '--limit-mm-per-prompt={"image": 1}'
+      - '--gpu-memory-utilization=0.9'
+      - '--seed=0'
+      - '--max-logprobs=5'
+  dotsocr:
+    environment: *v100-env
+    command:
+      - '--model=dots-studio/dots.ocr'
+      - '--served-model-name=dotsocr'
+      - '--trust-remote-code'
+      - '--dtype=half'
+      - '--max-model-len=16384'
+      - '--limit-mm-per-prompt={"image": 1}'
+      - '--gpu-memory-utilization=0.9'
+      - '--seed=0'
+      - '--max-logprobs=5'
+  typhoon:
+    environment: *v100-env
+    command:
+      - '--model=typhoon-ai/typhoon-ocr1.5-2b'
+      - '--served-model-name=typhoon'
+      - '--dtype=half'
+      - '--max-model-len=16384'
+      - '--limit-mm-per-prompt={"image": 1}'
+      - '--gpu-memory-utilization=0.9'
+      - '--seed=0'
+      - '--max-logprobs=5'
