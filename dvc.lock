@@ -19,8 +19,8 @@ stages:
       nfiles: 31
     - path: ocr_bench/data
       hash: md5
-      md5: c04f083f319c4e130d48566d96cf963a.dir
-      size: 31002
+      md5: 682b4a261c2c36e676df09133d12e731.dir
+      size: 31014
       nfiles: 6
     outs:
     - path: data/runs/2026-09-22-a/config.resolved.yaml
@@ -29,8 +29,8 @@ stages:
       size: 1982
     - path: data/runs/2026-09-22-a/gt
       hash: md5
-      md5: bda1e7ed1271ab8f3ebe22ee01a90575.dir
-      size: 5538757
+      md5: 64a6fa9b902122f5e1d702da829e5fef.dir
+      size: 6289243
       nfiles: 1878
     - path: data/runs/2026-09-22-a/img
       hash: md5
