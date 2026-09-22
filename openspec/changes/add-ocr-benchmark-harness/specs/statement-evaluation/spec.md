@@ -12,11 +12,20 @@ For `digital` pages, the system SHALL score the following against the text-layer
 - Page text with `cer`.
 - Header fields (account number, account name, period, opening/closing balance) with `field_exact`.
 
-It SHALL parse ground-truth rows from the text layer using the bank's configured column layout, and score rows with `row_f1`.
+It SHALL parse ground-truth rows from the text layer's positioned words:
 
-#### Scenario: Bank without a layout
-- **WHEN** a digital page's bank has no configured row layout
+1. Detect the column-header row by Thai/English keywords (date/วันที่, description/รายการ/particulars, withdrawal/ถอน/debit, deposit/ฝาก/credit, amount/จำนวนเงิน, balance/คงเหลือ/outstanding, channel/ช่องทาง).
+2. Assign each token below the header to the column whose x-span it overlaps most.
+
+This is bank-agnostic. Per-bank configuration SHALL only override details the words cannot reveal, such as the date format or a signed single amount column. Rows SHALL then be scored with `row_f1`.
+
+#### Scenario: No recognizable header
+- **WHEN** a digital page has no detectable column-header row
 - **THEN** page CER and header fields are still scored, `row_f1` is marked not applicable for that page, and the report counts such pages
+
+#### Scenario: Single amount column
+- **WHEN** a bank prints withdrawals and deposits in one "Withdrawal / Deposit" column (KBank)
+- **THEN** each amount's side is taken from its x-position within that column's span
 
 ### Requirement: Check B — arithmetic self-consistency
 For every extracted statement file, the system SHALL evaluate the following equations:
@@ -33,6 +42,10 @@ Per model, it SHALL report:
 
 Decimal arithmetic SHALL be exact.
 
+- Row order SHALL be detected from the row dates, since some banks print newest first (TTB). The equations SHALL be evaluated in chronological order.
+- Opening rows ("B/F", "Beginning Balance", ยอดยกมา) SHALL be treated as the opening balance, not as transactions.
+- When a row's debit/credit side is not given by the extraction (a single unsigned amount column), it SHALL be inferred from the balance delta and marked `side_inferred`. Such rows SHALL be excluded from `row_consistency_rate`, because they are consistent by construction.
+
 #### Scenario: Consistent file
 - **WHEN** every row satisfies the balance equation and the last balance equals the closing balance
 - **THEN** `file_reconciles=true` for that file
@@ -40,6 +53,14 @@ Decimal arithmetic SHALL be exact.
 #### Scenario: Broken row flagged
 - **WHEN** row 7's balance does not equal row 6's balance plus credit minus debit
 - **THEN** row 7 gets `balance_mismatch`, `first_break_row=7`, and `file_reconciles=false`
+
+#### Scenario: Newest-first statement
+- **WHEN** a statement lists rows newest first and every row is consistent in chronological order
+- **THEN** `file_reconciles=true` and no row is flagged
+
+#### Scenario: Inferred side excluded
+- **WHEN** a row's side was inferred from its balance delta
+- **THEN** the row is marked `side_inferred` and does not count toward `row_consistency_rate`
 
 #### Scenario: Cross-page continuity
 - **WHEN** the first balance basis on page i+1 does not match the last balance on page i
