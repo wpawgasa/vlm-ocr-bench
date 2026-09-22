@@ -141,6 +141,8 @@ class TestToSample:
         sample = to_sample(row, spec, "Table parsing", "category")
         assert isinstance(sample.gt, HtmlGT)
         assert "<th>a</th>" in sample.gt.html
+        # the official scorer sees the original answer, so it is kept verbatim
+        assert sample.gt.raw == answer
 
     def test_bare_tr_wrapped_in_table(self):
         answer = "<tr><td>x</td></tr>"

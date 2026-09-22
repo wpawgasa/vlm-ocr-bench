@@ -93,7 +93,7 @@ Each model config names a parser per request type. Parsing failures produce a `N
 - **WER:** PyThaiNLP `newmm` tokens, with the same Levenshtein over token lists.
 - **TED:** `apted`, using the TEDS formula `1 − TED/max(nodes)` on HTML trees parsed with `lxml`. This is the formula ThaiOCRBench and OmniDocBench use.
 - **ANLS:** a small local implementation.
-- **BMFL:** ported from ThaiOCRBench's published scorer code, with a fixture of 20 published sample scores in `tests/fixtures/bmfl/`. It is gated as described in the accuracy-scoring spec.
+- **Official score (`tob_score`, incl. BMFL):** ported from OCRBench v2's evaluator (MIT; ThaiOCRBench's scorer is an unlicensed adaptation of it, so its Thai-specific changes are reimplemented, not copied). A parity fixture of ≥20 published per-sample scores per kept task (ThaiOCRBench `res_folder`, Qwen2.5-VL-72B) gates comparability per task. NLTK METEOR needs WordNet data, downloaded in post-create and CI.
 - **Bootstrap:** a seeded numpy resample over the sample index. For field metrics, resampling happens over samples, not fields, to respect clustering.
 
 ### D7. Ground-truth representation
@@ -157,7 +157,7 @@ TeleOCR's official vLLM path registers a modified `Qwen2_5_VLForConditionalGener
 ## Risks / Trade-offs
 
 - **Task names, domain field or license in ThaiOCRBench differ from expectations** → The loader asserts task names and prints what is present, and the domain slice is optional. Confirm the license before quoting.
-- **BMFL port drifts from the official scorer** → A mandatory fixture gate applies. On failure, the report marks BMFL "not comparable" and CER/WER still stand.
+- **Official-score port drifts (e.g. PyThaiNLP/NLTK version differences)** → A mandatory per-task parity gate applies. On failure, the report marks BMFL "not comparable" and CER/WER still stand.
 - **TeleOCR emits no bbox or no JSON** → The probe records `no`. dots.ocr carries Q4, and TeleOCR shows text-only rows. The scorecard never errors on a missing capability.
 - **Logprob span matching fails often (for example, the model reformats numbers)** → The digit-only fallback is used, and `span_found` rate is reported. The `agree` and `arith` features still carry signal.
 - **Some handwriting questions are QA ("what does item 3 say?")** → Native OCR returns the whole text, so these samples score poorly by construction. The report shows handwriting separately, with this caveat.

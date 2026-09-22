@@ -6,6 +6,7 @@ sudo chown -R vscode:vscode /home/vscode/.venv /home/vscode/.cache/uv
 
 if [[ -f pyproject.toml ]]; then
   uv sync --all-extras
+  uv run python -m nltk.downloader -q wordnet omw-1.4
 else
   echo "post-create: no pyproject.toml yet (milestone M0) — run 'uv sync --all-extras' once it exists."
 fi

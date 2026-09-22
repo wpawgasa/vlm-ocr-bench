@@ -18,6 +18,7 @@ from ocr_bench.config import (
     ConfigError,
     ModelConfig,
     ResolvedConfig,
+    RunConfig,
     load_config,
     load_model_config,
 )
@@ -25,13 +26,24 @@ from ocr_bench.data.bankstmt import UnknownBankError, coverage_warnings, prepare
 from ocr_bench.data.manifest import PreparedSample, materialize
 from ocr_bench.data.thaiocrbench import TaskNameError, prepare_thaiocrbench
 from ocr_bench.jsonl import latest_predictions, read_rows, write_rows_atomic
+from ocr_bench.metrics import tob_official
+from ocr_bench.metrics.aggregate import aggregate
+from ocr_bench.metrics.dispatch import score_run
 from ocr_bench.models import registry
 from ocr_bench.models.base import OcrModel
 from ocr_bench.models.probe import build_probe_report, probe_model, select_probe_pages
 from ocr_bench.models.runner import infer_model, pending_rows, summarize
 from ocr_bench.models.vllm_client import EndpointUnavailable
 from ocr_bench.paths import MissingArtifactError, RunPaths, require
-from ocr_bench.schemas import ManifestRow, PredictionRow, PrepareSummary, Task
+from ocr_bench.schemas import (
+    GROUND_TRUTH,
+    GroundTruth,
+    ManifestRow,
+    NoGT,
+    PredictionRow,
+    PrepareSummary,
+    Task,
+)
 
 app = typer.Typer(
     name="ocrbench",
@@ -289,11 +301,62 @@ def probe(
 def score(
     run_id: str = typer.Option(..., "--run-id", help="Run id to score."),
 ) -> None:
-    """Score predictions against ground truth and write scores/fields rows."""
+    """Score predictions against ground truth and write scores/fields rows.
+
+    Writes scores.jsonl, fields.jsonl, aggregates.jsonl and tob_parity.json.
+    """
     rp = RunPaths.for_run(run_id)
     _require_or_exit(rp.manifest, "prepare")
     _require_or_exit(rp.predictions, "infer")
-    _not_implemented("score", "4.7")
+
+    manifest = list(read_rows(rp.manifest, ManifestRow))
+    latest = latest_predictions(rp.predictions)
+    known = {(r.sample_id, r.condition.value) for r in manifest}
+    stray = sum(1 for (sid, cond, _) in latest if (sid, cond) not in known)
+    if stray:
+        typer.echo(f"warning: {stray} prediction rows match no manifest row; ignored", err=True)
+
+    gt_cache: dict[str, GroundTruth] = {}
+
+    def load_gt(row: ManifestRow) -> GroundTruth:
+        if row.gt_path is None:
+            return NoGT(gt_kind="none")
+        if row.gt_path not in gt_cache:
+            text = (rp.root / row.gt_path).read_text(encoding="utf-8")
+            gt_cache[row.gt_path] = GROUND_TRUTH.validate_json(text)
+        return gt_cache[row.gt_path]
+
+    scores, fields = score_run(manifest, latest, load_gt)
+    write_rows_atomic(rp.scores, scores)
+    write_rows_atomic(rp.fields, fields)
+
+    run_cfg = _run_config_for(rp)
+    aggregates = aggregate(scores, fields, run_cfg.bootstrap_resamples, run_cfg.seed)
+    write_rows_atomic(rp.aggregates, aggregates)
+
+    parity = tob_official.run_parity()
+    rp.tob_parity.write_text(
+        json.dumps(parity, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    not_comparable = sorted(t for t, info in parity.items() if not info["comparable"])
+    missing = sum(1 for s in scores if s.extra.get("missing_prediction"))
+    typer.echo(
+        f"scored {len(manifest)} manifest rows: {len(scores)} score rows, "
+        f"{len(fields)} field rows, {len(aggregates)} aggregate rows"
+    )
+    if missing:
+        typer.echo(f"warning: {missing} score rows are for missing predictions", err=True)
+    if not_comparable:
+        typer.echo(f"tob_score not comparable for: {', '.join(not_comparable)}", err=True)
+
+
+def _run_config_for(rp: RunPaths) -> RunConfig:
+    """The run section of the run's `config.resolved.yaml` (defaults if absent)."""
+    if rp.config_resolved.exists():
+        data = yaml.safe_load(rp.config_resolved.read_text(encoding="utf-8")) or {}
+        if "run" in data:
+            return RunConfig.model_validate(data["run"])
+    return RunConfig(models=[], datasets=[])
 
 
 @app.command()

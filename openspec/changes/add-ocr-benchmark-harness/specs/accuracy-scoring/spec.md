@@ -18,17 +18,26 @@ The system SHALL compute these text metrics:
 
 - `cer`: character-level Levenshtein distance over NFC codepoints divided by ground-truth length.
 - `wer`: Levenshtein distance over Thai word tokens (PyThaiNLP `newmm`) divided by the ground-truth token count.
-- `bmfl`: ThaiOCRBench's official text score, reimplemented.
-
-The `bmfl` implementation SHALL reproduce published sample scores within 0.01 on a fixture of 20 samples before its numbers are reported as comparable.
+- `bmfl`: ThaiOCRBench's official text score, (BLEU + METEOR + F-measure + (1 − edit distance)) / 4 over PyThaiNLP `newmm` tokens.
 
 #### Scenario: CER on identical text
 - **WHEN** prediction and ground truth are identical after normalization
 - **THEN** `cer` = 0
 
-#### Scenario: BMFL fixture gate
-- **WHEN** the BMFL fixture test fails (any sample off by more than 0.01)
-- **THEN** the report marks BMFL columns "not comparable" instead of presenting them beside published numbers
+### Requirement: Official ThaiOCRBench task score
+For every kept ThaiOCRBench task, the system SHALL also compute `tob_score`, the benchmark's official per-sample score, so results sit beside published numbers:
+
+- BMFL for Full-page OCR, Fine-grained text recognition and Handwritten content extraction.
+- The VQA-style score for Text recognition and Document classification.
+- TEDS for Table parsing.
+- The document-parsing score for Document parsing.
+- Key-value F1 for Key information extraction and mapping.
+
+It SHALL be applied to the model's answer in its final documented output form, as the official evaluator receives it: the model's own official post-processing applied (for example OTSL→HTML, or layout JSON rendered as reading-order Markdown with HTML tables), and for benchmark-question requests the reply text itself. It SHALL NOT be applied to our canonicalized text. The implementation SHALL reproduce the published per-sample scores of a reference model (`res_folder` of the ThaiOCRBench repository) within 0.01, on a fixture of at least 20 samples per kept task, before its numbers are reported as comparable.
+
+#### Scenario: Parity fixture gate
+- **WHEN** a task's parity fixture test fails (any sample off by more than 0.01)
+- **THEN** the report marks that task's `tob_score` "not comparable" instead of presenting it beside published numbers
 
 ### Requirement: Structure metrics
 The system SHALL compute tree edit distance similarity (`ted`) for Table parsing and Document parsing. The score is normalized to [0,1], where 1 means identical trees. It SHALL compute ANLS with threshold 0.5 for Document classification.

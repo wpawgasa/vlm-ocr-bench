@@ -38,6 +38,14 @@ class RunPaths:
         return self.root / "fields.jsonl"
 
     @property
+    def aggregates(self) -> Path:
+        return self.root / "aggregates.jsonl"
+
+    @property
+    def tob_parity(self) -> Path:
+        return self.root / "tob_parity.json"
+
+    @property
     def calibration(self) -> Path:
         return self.root / "calibration.jsonl"
 

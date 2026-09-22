@@ -167,7 +167,7 @@ def to_sample(
     if spec.task in _TEXT_TASKS:
         gt = TextGT(gt_kind="text", text=answer)
     elif spec.task == Task.table:
-        gt = HtmlGT(gt_kind="html", html=table_answer_to_html(answer))
+        gt = HtmlGT(gt_kind="html", html=table_answer_to_html(answer), raw=answer)
     elif spec.task in (Task.kie, Task.kie_map):
         try:
             parsed = parse_answer_json(answer)

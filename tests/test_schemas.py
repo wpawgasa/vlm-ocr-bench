@@ -7,6 +7,7 @@ from pydantic import BaseModel, ValidationError
 
 from ocr_bench.schemas import (
     GROUND_TRUTH,
+    AggregateRow,
     Block,
     BlockType,
     CalibrationRow,
@@ -493,3 +494,49 @@ def test_prediction_row_n_requests_default_and_roundtrip():
     )
     assert row.n_requests == 1
     _roundtrip(row.model_copy(update={"n_requests": 7}))
+
+
+def test_score_and_field_rows_carry_subtask():
+    row = ScoreRow(
+        sample_id="s1",
+        condition=Condition.clean,
+        model="m",
+        task=Task.ocr_line,
+        subtask="Fine-grained text recognition",
+        metric="cer",
+        value=0.1,
+    )
+    _roundtrip(row)
+    fr = FieldResult(
+        sample_id="s1",
+        condition=Condition.clean,
+        model="m",
+        task=Task.kie,
+        subtask="Key information extraction",
+        field="a",
+        is_critical=False,
+        pred=None,
+        gt="1",
+        field_exact=0,
+        field_fuzzy=0,
+    )
+    _roundtrip(fr)
+
+
+def test_html_gt_keeps_optional_raw_answer():
+    gt = HtmlGT(gt_kind="html", html="<table></table>", raw="| a |")
+    assert GROUND_TRUTH.validate_json(gt.model_dump_json()) == gt
+    assert HtmlGT(gt_kind="html", html="<table></table>").raw is None
+
+
+def test_aggregate_row_roundtrip():
+    row = AggregateRow(
+        table="task_model",
+        keys={"task": "kie", "model": "m"},
+        metric="kie_f1",
+        mean=0.5,
+        n=10,
+        ci_low=0.4,
+        ci_high=0.6,
+    )
+    _roundtrip(row)

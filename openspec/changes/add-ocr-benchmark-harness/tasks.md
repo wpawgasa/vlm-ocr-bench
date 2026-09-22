@@ -33,14 +33,14 @@
 
 ## 4. M3 Normalization and scoring
 
-- [ ] 4.1 Implement `normalize/text.py` (NFC, Thai→Arabic digits, zero-width strip, whitespace collapse, legacy Thai PUA glyphs U+F700–U+F71A → standard Thai codepoints (seen in BBL text layers), raw kept); verify spec scenarios as unit tests
-- [ ] 4.2 Implement `normalize/fields.py` (amount, date with BE→CE, account digits-only, name) with unparseable-value flagging; verify tests for "15/03/2568"→"2025-03-15", "฿152,340.75 บาท"→152340.75, "123-4-56789-0"→"1234567890"
-- [ ] 4.3 Implement `metrics/cer_wer.py` (CER over NFC, WER over `newmm` tokens); verify identical text → 0 and hand-computed cases
-- [ ] 4.4 Port BMFL from the ThaiOCRBench scorer and add a 20-sample published fixture under `tests/fixtures/bmfl/`; verify all fixture samples within 0.01 (record a gate result consumed by the report)
-- [ ] 4.5 Implement `metrics/ted.py` (TEDS on HTML via lxml + apted) and `metrics/anls.py` (threshold 0.5); verify identical table → 1 and ANLS below-threshold → 0
-- [ ] 4.6 Implement `metrics/kie_f1.py` (field_exact incl. null==null, field_fuzzy CER ≤ 0.1, micro P/R/F1, false accept/false reject); verify the FA and FR spec scenarios
-- [ ] 4.7 Implement scorer dispatch on `(task, gt_kind)` and wire `ocrbench score` writing `scores.jsonl` and `fields.jsonl` with all slice keys, errored predictions scored worst-case; verify byte-identical re-runs and an errored-row test
-- [ ] 4.8 Implement slice aggregation with seeded 1,000-resample bootstrap over samples (task×model, condition×model, critical×model, bank×doc_type×model, domain×model); verify each aggregate has mean/n/CI and CI brackets the mean on a fixture
+- [x] 4.1 Implement `normalize/text.py` (NFC, Thai→Arabic digits, zero-width strip, whitespace collapse, legacy Thai PUA glyphs U+F700–U+F71A → standard Thai codepoints (seen in BBL text layers), raw kept); verify spec scenarios as unit tests
+- [x] 4.2 Implement `normalize/fields.py` (amount, date with BE→CE, account digits-only, name) with unparseable-value flagging; verify tests for "15/03/2568"→"2025-03-15", "฿152,340.75 บาท"→152340.75, "123-4-56789-0"→"1234567890"
+- [x] 4.3 Implement `metrics/cer_wer.py` (CER over NFC, WER over `newmm` tokens); verify identical text → 0 and hand-computed cases
+- [x] 4.4 Port the official ThaiOCRBench per-task scorer (`tob_score`: BMFL, VQA score, TEDS, doc-parsing, KIE F1) from OCRBench v2 (MIT, attributed; Thai deltas reimplemented) and add a parity fixture of ≥20 published per-sample scores per kept task from ThaiOCRBench `res_folder` as package data under `ocr_bench/metrics/tob_parity/` (read at runtime by `score`); verify every fixture sample within 0.01 and record a per-task gate result consumed by the report
+- [x] 4.5 Implement `metrics/ted.py` (TEDS on HTML via lxml + apted) and `metrics/anls.py` (threshold 0.5); verify identical table → 1 and ANLS below-threshold → 0
+- [x] 4.6 Implement `metrics/kie_f1.py` (field_exact incl. null==null, field_fuzzy CER ≤ 0.1, micro P/R/F1, false accept/false reject); verify the FA and FR spec scenarios
+- [x] 4.7 Implement scorer dispatch on `(task, gt_kind)` and wire `ocrbench score` writing `scores.jsonl` and `fields.jsonl` with all slice keys, errored predictions scored worst-case; verify byte-identical re-runs and an errored-row test
+- [x] 4.8 Implement slice aggregation with seeded 1,000-resample bootstrap over samples (task×model, condition×model, critical×model, bank×doc_type×model, domain×model); verify each aggregate has mean/n/CI and CI brackets the mean on a fixture
 
 ## 5. M4 Statement evaluation
 

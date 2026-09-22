@@ -233,6 +233,8 @@ class HtmlGT(BaseModel):
 
     gt_kind: Literal["html"]
     html: str
+    # The benchmark's original answer (markdown or HTML) as the official scorer sees it.
+    raw: str | None = None
 
 
 class JsonGT(BaseModel):
@@ -277,6 +279,7 @@ class ScoreRow(BaseModel):
     task: Task
     metric: str
     value: float | None
+    subtask: str | None = None
     domain: str | None = None
     bank: str | None = None
     doc_type: str | None = None
@@ -293,6 +296,7 @@ class FieldResult(BaseModel):
     task: Task
     field: str
     is_critical: bool
+    subtask: str | None = None
     pred: str | None
     gt: str | None
     field_exact: int
@@ -302,6 +306,21 @@ class FieldResult(BaseModel):
     domain: str | None = None
     bank: str | None = None
     doc_type: str | None = None
+
+
+class AggregateRow(BaseModel):
+    """One cell of a slice table in `aggregates.jsonl`: a metric's mean over the samples
+    matching `keys`, with a 95% bootstrap CI over samples."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    table: str
+    keys: dict[str, str | bool | None]
+    metric: str
+    mean: float | None
+    n: int
+    ci_low: float | None
+    ci_high: float | None
 
 
 class CalibrationRow(BaseModel):
