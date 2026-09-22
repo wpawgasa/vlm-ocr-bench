@@ -1,0 +1,51 @@
+schema: '2.0'
+stages:
+  prepare:
+    cmd: OCRBENCH_DATA_DIR=data ocrbench prepare --run-id 2026-09-22-a --force
+    deps:
+    - path: configs
+      hash: md5
+      md5: 096087d42da622709bc33353c83a44f1.dir
+      size: 6303
+      nfiles: 6
+    - path: data/statements
+      hash: md5
+      md5: c54d95d781c70338dfdd5466656470b8.dir
+      size: 129018076
+      nfiles: 31
+    - path: ocr_bench/config.py
+      hash: md5
+      md5: c62b25023ef06b07d9db5b7f2335c156
+      size: 4511
+    - path: ocr_bench/data
+      hash: md5
+      md5: c04f083f319c4e130d48566d96cf963a.dir
+      size: 31002
+      nfiles: 6
+    - path: ocr_bench/schemas.py
+      hash: md5
+      md5: cc6b7288463d4fd8f3a181f6e4366047
+      size: 8492
+    outs:
+    - path: data/runs/2026-09-22-a/config.resolved.yaml
+      hash: md5
+      md5: 91e1eff6849d54c7f96c98cc9170d3de
+      size: 5282
+    - path: data/runs/2026-09-22-a/gt
+      hash: md5
+      md5: bda1e7ed1271ab8f3ebe22ee01a90575.dir
+      size: 5538757
+      nfiles: 1878
+    - path: data/runs/2026-09-22-a/img
+      hash: md5
+      md5: 5c0983e08d1bbdea383ff8c1e903d078.dir
+      size: 7640394768
+      nfiles: 6846
+    - path: data/runs/2026-09-22-a/manifest.jsonl
+      hash: md5
+      md5: e3a31a572253a313c03df4396414e9fe
+      size: 4967676
+    - path: data/runs/2026-09-22-a/prepare_summary.json
+      hash: md5
+      md5: f110b22b2293c2e4efb7b06ec91ac774
+      size: 1556

@@ -31,6 +31,7 @@ class TaskSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task: Task
+    code: str
     cap: int | None = None
 
 
@@ -42,7 +43,7 @@ class ThaiOCRBenchConfig(BaseModel):
     split: str = "test"
     seed: int = 42
     tasks: dict[str, TaskSpec]
-    domain_field: str | None = "domain"
+    domain_field: str | None = "category"
     priority_domains: list[str] = Field(default_factory=lambda: ["Government", "Finance"])
 
 

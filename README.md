@@ -31,7 +31,25 @@ see `.devcontainer/.env.example`.
 uv sync --all-extras   # install runtime + dev (pytest, ruff) deps into /home/vscode/.venv
 uv run pytest          # runs tests/ (live-server tests are skipped by default)
 uv run ocrbench --help # lists the prepare/infer/probe/score/calibrate/bench-latency/report stages
+ocrbench prepare --config configs/run.yaml --run-id <id> [--datasets thaiocrbench]
 ```
+
+## Prepared data (DVC)
+
+The raw statements (`data/statements`) and the prepared run `data/runs/2026-09-22-a` are
+versioned with DVC on `gs://looloo-ocr-weights-and-data/vlm-ocr-bench/dvc`, so no host needs to
+re-run `prepare` (about 20 minutes of CPU). They are client data: the bucket is the only copy
+outside our hosts. Git holds only pointer files (`data/statements.dvc`, `dvc.yaml`, `dvc.lock`).
+
+```bash
+# once per host: point DVC at the service-account key (never commit the key or config.local)
+uv run dvc remote modify --local gcs credentialpath /path/to/looloo-ocr-<id>.json
+uv run dvc pull          # statements + prepared run
+uv run dvc status        # "up to date" = data matches the code/configs in this commit
+```
+
+If `dvc status` reports the `prepare` stage changed, meaning the preparation code, configs or statements
+changed, rebuild and publish it with `uv run dvc repro prepare && uv run dvc push`.
 
 ## Model servers
 

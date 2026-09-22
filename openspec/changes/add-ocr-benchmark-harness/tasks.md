@@ -12,12 +12,12 @@
 
 ## 2. M1 Data preparation
 
-- [ ] 2.1 Implement `data/thaiocrbench.py`: HF load, 9-task filter with a task-name assertion listing the present names, seeded (42) domain-stratified caps, GT export per task to `gt/*.json|txt|html`, `critical_fields` from the field-name rules; verify with a tiny fake dataset fixture (caps, determinism, missing-name failure, no-domain path)
-- [ ] 2.2 Implement `data/bankstmt.py`: `pdffonts` routing (digital/scanned/photo), bank mapping with a hard failure on unknown, `pdftoppm -r 200` rasterization, `pdftotext -layout` + `pdfplumber` word boxes scaled to 200 dpi; verify on a generated 2-page digital PDF and an image file fixture
-- [ ] 2.3 Implement the corpus coverage summary and target-mix warnings written to `prepare_summary.json`; verify a test with an under-target corpus emits the warning
-- [ ] 2.4 Implement `data/degrade.py` (`clean`, `scan_low`, `photo`) with a `(sample_id, condition)`-seeded RNG and homography box transform per design D9; verify pixel-identical re-runs and that a transformed box matches the homography-mapped corners
-- [ ] 2.5 Implement `data/manifest.py` and wire `ocrbench prepare` (writes images, GT, `manifest.jsonl`, `config.resolved.yaml`); verify manifest rows = 3 × samples on the fixture run and that two prepares yield identical manifests
-- [ ] 2.6 Run `prepare` on real ThaiOCRBench + the statement directory on the H100 host; verify the task-name check passes, record counts in `prepare_summary.json`, and eyeball 20 random manifest rows
+- [x] 2.1 Implement `data/thaiocrbench.py`: HF load, 9-task filter with a task-name assertion listing the present names, seeded (42) domain-stratified caps, GT export per task to `gt/*.json|txt|html`, `critical_fields` from the field-name rules; verify with a tiny fake dataset fixture (caps, determinism, missing-name failure, no-domain path)
+- [x] 2.2 Implement `data/bankstmt.py`: `pdffonts` routing (digital/scanned/photo), bank mapping with a hard failure on unknown, `pdftoppm -r 200` rasterization, `pdftotext -layout` + `pdfplumber` word boxes scaled to 200 dpi; verify on a generated 2-page digital PDF and an image file fixture
+- [x] 2.3 Implement the corpus coverage summary and target-mix warnings written to `prepare_summary.json`; verify a test with an under-target corpus emits the warning
+- [x] 2.4 Implement `data/degrade.py` (`clean`, `scan_low`, `photo`) with a `(sample_id, condition)`-seeded RNG and homography box transform per design D9; verify pixel-identical re-runs and that a transformed box matches the homography-mapped corners
+- [x] 2.5 Implement `data/manifest.py` and wire `ocrbench prepare` (writes images, GT, `manifest.jsonl`, `config.resolved.yaml`); verify manifest rows = 3 × samples on the fixture run and that two prepares yield identical manifests
+- [x] 2.6 Run `prepare` on real ThaiOCRBench + the statement directory (CPU-only; any host whose `runs/` the inference host can read); verify the task-name check passes, record counts in `prepare_summary.json`, and eyeball 20 random manifest rows
 
 ## 3. M2 Inference
 
@@ -32,7 +32,7 @@
 
 ## 4. M3 Normalization and scoring
 
-- [ ] 4.1 Implement `normalize/text.py` (NFC, Thai→Arabic digits, zero-width strip, whitespace collapse, raw kept); verify spec scenarios as unit tests
+- [ ] 4.1 Implement `normalize/text.py` (NFC, Thai→Arabic digits, zero-width strip, whitespace collapse, legacy Thai PUA glyphs U+F700–U+F71A → standard Thai codepoints (seen in BBL text layers), raw kept); verify spec scenarios as unit tests
 - [ ] 4.2 Implement `normalize/fields.py` (amount, date with BE→CE, account digits-only, name) with unparseable-value flagging; verify tests for "15/03/2568"→"2025-03-15", "฿152,340.75 บาท"→152340.75, "123-4-56789-0"→"1234567890"
 - [ ] 4.3 Implement `metrics/cer_wer.py` (CER over NFC, WER over `newmm` tokens); verify identical text → 0 and hand-computed cases
 - [ ] 4.4 Port BMFL from the ThaiOCRBench scorer and add a 20-sample published fixture under `tests/fixtures/bmfl/`; verify all fixture samples within 0.01 (record a gate result consumed by the report)

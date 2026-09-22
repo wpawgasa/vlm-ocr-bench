@@ -30,7 +30,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = [
+    "dvc[gs]>=3.50",
+    "pytest>=8",
+    "ruff>=0.6",
+]
 
 [project.scripts]
 ocrbench = "ocr_bench.cli:app"

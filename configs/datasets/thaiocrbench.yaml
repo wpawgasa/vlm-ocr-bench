@@ -4,31 +4,41 @@
 kind: thaiocrbench
 hf_repo: typhoon-ai/ThaiOCRBench
 seed: 42
+domain_field: category
 tasks:
   "Full-page OCR":
     task: ocr_fullpage
+    code: fullpage
     cap: 200
   "Text recognition":
     task: ocr_line
+    code: textrec
     cap: 200
   "Fine-grained text recognition":
     task: ocr_line
+    code: finegrained
     cap: 200
   "Handwritten content extraction":
     task: handwriting
+    code: handwriting
     cap: null
   "Table parsing":
     task: table
+    code: table
     cap: null
   "Document parsing":
     task: docparse
+    code: docparse
     cap: 200
   "Key information extraction":
     task: kie
+    code: kie
     cap: null
   "Key information mapping":
     task: kie_map
+    code: kiemap
     cap: null
   "Document classification":
     task: classify
+    code: classify
     cap: null

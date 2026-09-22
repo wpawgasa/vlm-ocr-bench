@@ -1,0 +1,5 @@
+[core]
+    autostage = true
+    remote = gcs
+['remote "gcs"']
+    url = gs://looloo-ocr-weights-and-data/vlm-ocr-bench/dvc

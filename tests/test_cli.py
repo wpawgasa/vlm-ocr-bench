@@ -1,7 +1,9 @@
 """Tests for ocr_bench.cli."""
 
+import shutil
 from pathlib import Path
 
+import yaml
 from typer.testing import CliRunner
 
 from ocr_bench.cli import app
@@ -38,14 +40,22 @@ def test_prepare_bad_config_exits_2(tmp_path, monkeypatch):
     assert result.exit_code == 2
 
 
-def test_prepare_real_config_exits_3_not_implemented(tmp_path, monkeypatch):
-    monkeypatch.setenv("OCRBENCH_DATA_DIR", str(tmp_path))
+def test_prepare_real_config_missing_statements_dir_exits_2(tmp_path, monkeypatch):
+    # Real configs, but with bankstmt's input_dir pointed at a directory that is
+    # guaranteed not to exist (the real /data/statements may exist on this host).
+    cfg = tmp_path / "configs"
+    shutil.copytree(REPO_ROOT / "configs", cfg)
+    bank_yaml = cfg / "datasets" / "bankstmt.yaml"
+    data = yaml.safe_load(bank_yaml.read_text(encoding="utf-8"))
+    data["input_dir"] = str(tmp_path / "no-such-dir")
+    bank_yaml.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    monkeypatch.setenv("OCRBENCH_DATA_DIR", str(tmp_path / "data"))
     result = runner.invoke(
         app,
-        ["prepare", "--config", str(REPO_ROOT / "configs" / "run.yaml"), "--run-id", "x"],
+        ["prepare", "--config", str(cfg / "run.yaml"), "--run-id", "x", "--datasets", "bankstmt"],
     )
-    assert result.exit_code == 3
-    assert "not implemented" in result.output
+    assert result.exit_code == 2
+    assert "does not exist" in result.output
 
 
 def test_infer_missing_manifest_exits_2(tmp_path, monkeypatch):

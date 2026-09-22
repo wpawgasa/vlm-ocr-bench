@@ -27,7 +27,7 @@ Full-page OCR, Text recognition, Fine-grained text recognition and Document pars
 - **THEN** `domain` is empty and `prepare` logs that the Government/Finance slice is unavailable
 
 ### Requirement: Bank-statement ingestion and routing
-The system SHALL ingest a directory of bank-statement PDFs and images. It SHALL classify each file as `digital` (PDF with embedded fonts), `scanned` (PDF with no fonts) or `photo` (image file). It SHALL record the bank for each file from a configured set (kbank, scb, bbl, ktb, krungsri, ttb, gsb). Every page SHALL be rasterized to a 200 dpi PNG and SHALL become one sample, carrying `page_no` and `n_pages`.
+The system SHALL ingest a directory of bank-statement PDFs and images. It SHALL classify each file as `digital` (PDF with embedded fonts), `scanned` (PDF with no fonts) or `photo` (image file). It SHALL record the bank for each file from a configured set (kbank, scb, bbl, ktb, krungsri, ttb, gsb, uob). Every page SHALL be rasterized to a 200 dpi PNG and SHALL become one sample, carrying `page_no` and `n_pages`.
 
 #### Scenario: Digital PDF routing
 - **WHEN** a PDF whose font listing is non-empty is ingested
@@ -47,6 +47,10 @@ For every `digital` page, the system SHALL extract the layout-preserving text la
 #### Scenario: Text-layer GT stored
 - **WHEN** a digital page is ingested
 - **THEN** its ground-truth file contains non-empty `gt_text` and a `gt_words` list, where each word has text and a bbox in page pixel coordinates at 200 dpi
+
+#### Scenario: Unusable text layer
+- **WHEN** a digital page's extracted text contains no statement keyword (Thai or English), i.e. the font encoding yields scrambled glyph codes
+- **THEN** the page keeps `doc_type=digital` but gets `gt_kind=none`, is counted in `statement_text_layer_unusable` in `prepare_summary.json`, and is excluded from the digital-page coverage target
 
 ### Requirement: Statement corpus coverage report
 `prepare` SHALL report the statement corpus composition: pages by `doc_type`, distinct banks, and the count of multi-page files. It SHALL warn when the corpus falls below the target mix: at least 40 digital pages, at least 40 scanned/photo pages, at least 4 banks and at least 10 multi-page statements.
@@ -72,7 +76,10 @@ Random parameters SHALL be derived from a seed determined by `(sample_id, condit
 - **THEN** the stored boxes for that condition equal the original boxes mapped through the applied homography
 
 ### Requirement: Manifest schema
-The system SHALL write `manifest.jsonl` with one row per `(sample, condition)`. The fields are `sample_id`, `source`, `task`, `domain`, `bank`, `doc_type`, `page_no`, `n_pages`, `condition`, `image_path`, `gt_kind`, `gt_path`, `critical_fields`.
+The system SHALL write `manifest.jsonl` with one row per `(sample, condition)`. The fields are `sample_id`, `source`, `task`, `subtask`, `domain`, `bank`, `doc_type`, `page_no`, `n_pages`, `condition`, `image_path`, `gt_kind`, `gt_path`, `critical_fields`, `question`.
+
+- `subtask` SHALL hold the ThaiOCRBench task display name, so that tasks sharing one `task` value (Text recognition and Fine-grained text recognition) remain separable in slices.
+- `question` SHALL hold the benchmark's per-sample instruction. It is needed for comparability and carries region coordinates for fine-grained recognition. It SHALL be empty for statements.
 
 - `gt_kind` SHALL be one of `json`, `text`, `html`, `text_layer`, `none`.
 - `critical_fields` SHALL list the field names that count as critical (IDs, amounts, dates, names, account numbers). It SHALL be empty for tasks without fields.

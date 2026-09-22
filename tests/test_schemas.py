@@ -24,6 +24,7 @@ from ocr_bench.schemas import (
     OutputField,
     OutputSource,
     PredictionRow,
+    PrepareSummary,
     RawPrediction,
     ScoreRow,
     Source,
@@ -49,6 +50,7 @@ def test_manifest_row_roundtrip():
         sample_id="s1",
         source=Source.thaiocrbench,
         task=Task.ocr_fullpage,
+        subtask="Full-page OCR",
         domain="Government",
         bank=None,
         doc_type=None,
@@ -59,8 +61,24 @@ def test_manifest_row_roundtrip():
         gt_kind=GtKind.text,
         gt_path="gt/s1.txt",
         critical_fields=["id_number"],
+        question="Extract all text.",
     )
     _roundtrip(row)
+
+
+def test_manifest_row_subtask_and_question_default():
+    row = ManifestRow(
+        sample_id="s1",
+        source=Source.thaiocrbench,
+        task=Task.ocr_fullpage,
+        page_no=1,
+        n_pages=1,
+        condition=Condition.clean,
+        image_path="img/s1.png",
+        gt_kind=GtKind.none,
+    )
+    assert row.subtask is None
+    assert row.question == ""
 
 
 def test_manifest_row_page_no_gt_n_pages_raises():
@@ -237,10 +255,18 @@ def test_ground_truth_html():
 
 
 def test_ground_truth_json():
-    gt = JsonGT(gt_kind="json", fields={"id_number": "123"}, label=None, statement=None)
+    gt = JsonGT(gt_kind="json", fields={"id_number": "123"}, label=None, statement=None, raw=None)
     dumped = GROUND_TRUTH.dump_json(gt)
     restored = GROUND_TRUTH.validate_json(dumped)
     assert restored == gt
+
+
+def test_ground_truth_json_raw():
+    gt = JsonGT(gt_kind="json", fields={"id_number": "123"}, raw='{"id_number": "123"}')
+    dumped = GROUND_TRUTH.dump_json(gt)
+    restored = GROUND_TRUTH.validate_json(dumped)
+    assert restored == gt
+    assert restored.raw == '{"id_number": "123"}'
 
 
 def test_ground_truth_text_layer_roundtrip_via_validate_json():
@@ -254,6 +280,21 @@ def test_ground_truth_text_layer_roundtrip_via_validate_json():
     restored = GROUND_TRUTH.validate_json(dumped)
     assert isinstance(restored, TextLayerGT)
     assert restored == gt
+    assert restored.homography is None
+
+
+def test_ground_truth_text_layer_with_homography():
+    h = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    gt = TextLayerGT(
+        gt_kind="text_layer",
+        gt_text="hello",
+        gt_words=[Word(text="hello", bbox=(0.0, 0.0, 5.0, 5.0))],
+        homography=h,
+    )
+    dumped = GROUND_TRUTH.dump_json(gt)
+    restored = GROUND_TRUTH.validate_json(dumped)
+    assert restored == gt
+    assert restored.homography == h
 
 
 def test_ground_truth_none():
@@ -372,3 +413,39 @@ def test_output_field_unknown_error_flag_raises():
             prompt_version="v0",
             run_id="run-1",
         )
+
+
+def test_prepare_summary_roundtrip():
+    summary = PrepareSummary(
+        run_id="run-1",
+        thaiocrbench={"Full-page OCR": 197},
+        thaiocrbench_domains={"Government": 12, "Finance": 8},
+        domain_slice_available=True,
+        statement_pages_by_doc_type={"digital": 10, "scanned": 5},
+        statement_banks=["kbank", "scb"],
+        statement_files=6,
+        statement_multipage_files=2,
+        n_samples=203,
+        n_manifest_rows=609,
+        warnings=["only 5 banks (< 4)"],
+    )
+    _roundtrip(summary)
+
+
+def test_prepare_summary_defaults():
+    summary = PrepareSummary(run_id="run-1")
+    assert summary.thaiocrbench == {}
+    assert summary.thaiocrbench_domains == {}
+    assert summary.domain_slice_available is False
+    assert summary.statement_pages_by_doc_type == {}
+    assert summary.statement_banks == []
+    assert summary.statement_files == 0
+    assert summary.statement_multipage_files == 0
+    assert summary.n_samples == 0
+    assert summary.n_manifest_rows == 0
+    assert summary.warnings == []
+
+
+def test_prepare_summary_forbids_unknown_key():
+    with pytest.raises(ValidationError):
+        PrepareSummary(run_id="run-1", bogus_field="nope")

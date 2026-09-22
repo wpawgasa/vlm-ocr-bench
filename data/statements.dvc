@@ -1,0 +1,6 @@
+outs:
+- md5: c54d95d781c70338dfdd5466656470b8.dir
+  size: 129018076
+  nfiles: 31
+  hash: md5
+  path: statements

@@ -14,11 +14,19 @@ build/
 .devcontainer/.env
 
 # Benchmark artefacts (bank statements are client data — never commit)
-runs/
-data/
-review/
+/runs/
+# data/ holds client data: ignore everything except DVC pointer files
+/data/*
+!/data/*.dvc
+!/data/.gitignore
+/review/
 *.pdf
 
 # Editors / OS
 .ipynb_checkpoints/
 .DS_Store
+
+# Cloud credentials (never commit)
+/looloo-ocr-*.json
+*service-account*.json
+.dvc/config.local

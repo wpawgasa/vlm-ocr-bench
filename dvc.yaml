@@ -1,0 +1,28 @@
+# Prepared benchmark data is expensive (~30 min CPU) and host-independent, so it is
+# built once, pushed to the DVC remote, and pulled on inference hosts (e.g. the H100).
+# `dvc status` reports the stage stale if the preparation code, configs or raw
+# statements change; `dvc repro prepare` then rebuilds it.
+#
+# OCRBENCH_DATA_DIR is pinned to the repo's data/ so outputs land where DVC tracks
+# them, whatever the host's DATA_DIR mount is.
+#
+# Not captured as a dependency: the ThaiOCRBench snapshot on the HF Hub (unpinned).
+
+vars:
+  - run_id: 2026-09-22-a
+
+stages:
+  prepare:
+    cmd: OCRBENCH_DATA_DIR=data ocrbench prepare --run-id ${run_id} --force
+    deps:
+      - configs
+      - data/statements
+      - ocr_bench/data
+      - ocr_bench/config.py
+      - ocr_bench/schemas.py
+    outs:
+      - data/runs/${run_id}/img
+      - data/runs/${run_id}/gt
+      - data/runs/${run_id}/manifest.jsonl
+      - data/runs/${run_id}/config.resolved.yaml
+      - data/runs/${run_id}/prepare_summary.json

@@ -1,17 +1,23 @@
 """`ocrbench` command-line entry point.
 
 M0 wires the run-directory contract (missing-upstream-artifact checks) and
-config validation for every stage. The stage bodies are implemented in later
-milestones; until then each command exits 3 with a pointer to its tasks.md
-entry.
+config validation for every stage. `prepare` is implemented (M1); the other
+stage bodies are implemented in later milestones, and until then each exits 3
+with a pointer to its tasks.md entry.
 """
 
+import json
 from pathlib import Path
 
 import typer
 
 from ocr_bench.config import ConfigError, load_config
+from ocr_bench.data.bankstmt import UnknownBankError, coverage_warnings, prepare_statements
+from ocr_bench.data.manifest import PreparedSample, materialize
+from ocr_bench.data.thaiocrbench import TaskNameError, prepare_thaiocrbench
+from ocr_bench.jsonl import write_rows_atomic
 from ocr_bench.paths import MissingArtifactError, RunPaths, require
+from ocr_bench.schemas import PrepareSummary
 
 app = typer.Typer(
     name="ocrbench",
@@ -45,14 +51,81 @@ def prepare(
         DEFAULT_CONFIG_PATH, "--config", help="Path to run.yaml."
     ),
     run_id: str = typer.Option(..., "--run-id", help="Run id to prepare."),
+    datasets: str = typer.Option(
+        "", "--datasets", help="Comma-separated subset of run.yaml's datasets (default: all)."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite an already-prepared run directory."
+    ),
 ) -> None:
     """Build the manifest, degraded images and ground truth for a run."""
     try:
-        load_config(config)
+        resolved = load_config(config)
     except ConfigError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
-    _not_implemented("prepare", "2.5")
+
+    rp = RunPaths.for_run(run_id)
+    if rp.manifest.exists() and not force:
+        typer.echo(f"run {run_id} already prepared; use --force", err=True)
+        raise typer.Exit(code=2)
+
+    dataset_names = list(resolved.run.datasets)
+    if datasets:
+        requested = _csv(datasets)
+        unknown = [d for d in requested if d not in dataset_names]
+        if unknown:
+            typer.echo(
+                f"unknown dataset(s) in --datasets: {unknown}; available: {dataset_names}",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        dataset_names = requested
+
+    rp.root.mkdir(parents=True, exist_ok=True)
+    rp.config_resolved.write_text(resolved.to_yaml(), encoding="utf-8")
+
+    all_samples: list[PreparedSample] = []
+    summary = PrepareSummary(run_id=run_id)
+
+    for name in dataset_names:
+        dataset_cfg = resolved.datasets[name]
+        try:
+            if dataset_cfg.kind == "thaiocrbench":
+                samples, info = prepare_thaiocrbench(dataset_cfg)
+                summary.thaiocrbench = info["thaiocrbench"]
+                summary.thaiocrbench_domains = info["thaiocrbench_domains"]
+                summary.domain_slice_available = info["domain_slice_available"]
+                summary.warnings.extend(info["warnings"])
+            elif dataset_cfg.kind == "bankstmt":
+                samples, info = prepare_statements(dataset_cfg)
+                summary.statement_pages_by_doc_type = info["statement_pages_by_doc_type"]
+                summary.statement_banks = info["statement_banks"]
+                summary.statement_files = info["statement_files"]
+                summary.statement_multipage_files = info["statement_multipage_files"]
+                summary.statement_text_layer_unusable = info["statement_text_layer_unusable"]
+                summary.warnings.extend(coverage_warnings(info, dataset_cfg.targets))
+            else:  # pragma: no cover — discriminated union covers only these kinds
+                continue
+        except (FileNotFoundError, TaskNameError, UnknownBankError) as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+
+        all_samples.extend(samples)
+
+    rows = materialize(all_samples, resolved.run.conditions, rp)
+    write_rows_atomic(rp.manifest, rows)
+
+    summary.n_samples = len(all_samples)
+    summary.n_manifest_rows = len(rows)
+    rp.prepare_summary.write_text(
+        json.dumps(summary.model_dump(mode="json"), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    for warning in summary.warnings:
+        typer.echo(f"warning: {warning}", err=True)
+    typer.echo(f"prepared {summary.n_samples} samples, {summary.n_manifest_rows} manifest rows")
 
 
 @app.command()

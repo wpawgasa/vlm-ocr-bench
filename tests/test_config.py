@@ -33,6 +33,40 @@ def test_load_real_run_config():
     thaiocrbench = resolved.datasets["thaiocrbench"]
     assert thaiocrbench.kind == "thaiocrbench"
     assert len(thaiocrbench.tasks) == 9
+    assert thaiocrbench.domain_field == "category"
+    expected_codes = {
+        "Full-page OCR": "fullpage",
+        "Text recognition": "textrec",
+        "Fine-grained text recognition": "finegrained",
+        "Handwritten content extraction": "handwriting",
+        "Table parsing": "table",
+        "Document parsing": "docparse",
+        "Key information extraction": "kie",
+        "Key information mapping": "kiemap",
+        "Document classification": "classify",
+    }
+    for name, spec in thaiocrbench.tasks.items():
+        assert spec.code == expected_codes[name]
+
+
+def test_task_spec_requires_code():
+    from pydantic import ValidationError
+
+    from ocr_bench.config import TaskSpec
+
+    with pytest.raises(ValidationError):
+        TaskSpec(task=Task.ocr_fullpage, cap=None)
+
+
+def test_thaiocrbench_config_domain_field_defaults_to_category():
+    from ocr_bench.config import ThaiOCRBenchConfig
+
+    cfg = ThaiOCRBenchConfig(
+        kind="thaiocrbench",
+        hf_repo="typhoon-ai/ThaiOCRBench",
+        tasks={"Full-page OCR": {"task": "ocr_fullpage", "cap": None, "code": "fullpage"}},
+    )
+    assert cfg.domain_field == "category"
 
 
 def test_unknown_model_raises_config_error(tmp_path):

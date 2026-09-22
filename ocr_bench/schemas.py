@@ -67,6 +67,7 @@ class ManifestRow(BaseModel):
     sample_id: str
     source: Source
     task: Task
+    subtask: str | None = None
     domain: str | None = None
     bank: str | None = None
     doc_type: str | None = None
@@ -77,6 +78,7 @@ class ManifestRow(BaseModel):
     gt_kind: GtKind
     gt_path: str | None = None
     critical_fields: list[str] = Field(default_factory=list)
+    question: str = ""
 
     @model_validator(mode="after")
     def _check_page_no(self) -> "ManifestRow":
@@ -212,6 +214,7 @@ class JsonGT(BaseModel):
     fields: dict[str, str | None] = Field(default_factory=dict)
     label: str | None = None
     statement: StatementPage | None = None
+    raw: str | None = None
 
 
 class TextLayerGT(BaseModel):
@@ -221,6 +224,7 @@ class TextLayerGT(BaseModel):
     gt_text: str
     gt_words: list[Word] = Field(default_factory=list)
     statement: StatementPage | None = None
+    homography: list[list[float]] | None = None
 
 
 class NoGT(BaseModel):
@@ -309,6 +313,23 @@ class OutputSource(BaseModel):
     file: str
     page: int
     bbox: BBox | None = None
+
+
+class PrepareSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    thaiocrbench: dict[str, int] = Field(default_factory=dict)
+    thaiocrbench_domains: dict[str, int] = Field(default_factory=dict)
+    domain_slice_available: bool = False
+    statement_pages_by_doc_type: dict[str, int] = Field(default_factory=dict)
+    statement_banks: list[str] = Field(default_factory=list)
+    statement_files: int = 0
+    statement_multipage_files: int = 0
+    statement_text_layer_unusable: int = 0
+    n_samples: int = 0
+    n_manifest_rows: int = 0
+    warnings: list[str] = Field(default_factory=list)
 
 
 class OutputField(BaseModel):
