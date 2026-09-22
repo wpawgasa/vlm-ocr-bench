@@ -1,0 +1,120 @@
+# Continuing on another host (H100 / L4)
+
+State as of commit `bf8dab1` (2026-09-22). Everything that can be built and tested without a
+benchmark GPU is done and on `main`: 569 tests, ruff clean. What is left needs an H100, an L4,
+or a human labeller.
+
+## 1. Set the host up
+
+```bash
+git clone https://code.loolootech.com/wichai.p/vlm-ocr-bench.git && cd vlm-ocr-bench
+# Reopen in the dev container (VS Code), or: devcontainer up --workspace-folder .
+uv sync --all-extras
+uv run python -m nltk.downloader -q wordnet omw-1.4     # NLTK METEOR needs WordNet
+```
+
+Per-host settings go in `.devcontainer/.env` (gitignored, see `.env.example`): `DATA_DIR`,
+`MODELS_DIR`, `HF_TOKEN`, GPU ids, ports, `VLLM_IMAGE`.
+
+**Data** (client bank statements: keep them on our hosts only):
+
+```bash
+cp /secure/path/looloo-ocr-<id>.json .            # the DVC service-account key, gitignored
+uv run dvc remote modify --local gcs credentialpath "$PWD/looloo-ocr-<id>.json"
+uv run dvc pull        # ~7.3 GB: data/statements + the prepared run data/runs/2026-09-22-a
+uv run dvc status      # expect "Data and pipelines are up to date" — do NOT re-run prepare
+```
+
+The prepared run is **`2026-09-22-a`**: 2,282 samples and 6,846 manifest rows (1,824
+ThaiOCRBench + 458 statement pages, each under `clean`, `scan_low` and `photo`).
+
+## 2. Start the model servers (H100, bf16)
+
+```bash
+scripts/serve_teleocr.sh up     # builds ocr-bench/teleocr-vllm:9921cff on first use (~35 min)
+scripts/serve_dotsocr.sh up
+```
+
+- TeleOCR needs **its own image**: `.devcontainer/teleocr-vllm.Dockerfile` adds the
+  `TeleOCR_vllm` plugin plus the `no_repeat_ngram_size` V1 logits processor, both pinned to
+  upstream commit `9921cff`. Compose passes `--logits-processors`, and the harness sends
+  `extra_body={"vllm_xargs": {"no_repeat_ngram_size": 100}}`.
+- Do **not** use `COMPOSE_EXTRA=.devcontainer/compose.v100.yaml` on the H100. That override is
+  fp16 plus sm_70 workarounds, and its numbers must never be quoted.
+- Optional third reference model: `docker compose -f .devcontainer/compose.yaml --profile typhoon up -d`
+  and add `typhoon_ocr15` to `configs/run.yaml`.
+
+## 3. The work that is left
+
+### 3.9 (issue #3) — full inference, the gate for everything below
+```bash
+uv run ocrbench infer --run-id 2026-09-22-a --models teleocr,dotsocr
+uv run ocrbench probe --run-id 2026-09-22-a
+```
+- `infer` is resumable: rows already present without an error are skipped, so an interrupted run
+  can simply be re-run. It refuses to finish if row counts don't match the manifest.
+- Accept only an error rate under 2%, and check that the per-model summary shows no silent drops.
+- This also completes **3.8**, whose dots.ocr live path could not be verified on the V100: vLLM
+  0.11 on sm_70 falls back to FlexAttention, which crashed with a CUDA illegal memory access, and
+  is far too slow (about 10 s for a 9-token reply). The V100 override already disables the
+  FlashInfer sampler, which is a separate sm_70 crash.
+- **Watch for:** TeleOCR rendered Thai as romanisation, Korean or Chinese in the V100 fp16 smoke
+  test, while reading English perfectly. If bf16 shows the same, that is a real finding about the
+  model (it is trained for Chinese and English), not a harness bug — a `probe.json` and a few
+  sample outputs make the case for the client deck.
+
+### Then, in order
+```bash
+uv run ocrbench score --run-id 2026-09-22-a          # ~30-40 s of that is the tob parity gate
+uv run ocrbench review export --run-id 2026-09-22-a  # -> runs/2026-09-22-a/review/queue.csv
+#   label 30-50 pages in the CSV's empty `label` column (task 5.8, ~4 h of human work)
+uv run ocrbench review load --run-id 2026-09-22-a --labels <filled.csv>
+uv run ocrbench score --run-id 2026-09-22-a          # re-score with the manual ground truth
+uv run ocrbench calibrate --run-id 2026-09-22-a --target-acc 0.99,0.995   # task 6.5
+```
+- `score` writes `scores.jsonl`, `fields.jsonl`, `aggregates.jsonl`, `statements.jsonl` and
+  `tob_parity.json`. Check `tob_parity.json` says every task is comparable; if a task is not, the
+  report must mark its official score "not comparable" rather than print it beside published
+  numbers.
+- `calibrate` reports ECE and the review rate per model, which is the Q3 answer. With too few
+  labelled fields it records `insufficient_data` instead of fitting, so the manual set matters.
+
+### Duplicates (issue #5, task 5.7 evaluation half)
+```bash
+uv run ocrbench dupset build --run-id 2026-09-22-a --dup-run-id 2026-09-22-a-dup
+uv run ocrbench infer --run-id 2026-09-22-a-dup --models teleocr,dotsocr
+uv run ocrbench dupset eval --dup-run-id 2026-09-22-a-dup
+```
+Hard negatives are same-bank, not same-account: no account number is known before extraction.
+
+### Issues #7 (latency) and #8 (report) are not built yet
+`bench-latency` and `report` are still stubs, exiting 3 with the task they need. #7 needs the
+H100 **and** an L4 session with the same vLLM version and dtype, and #8 needs a completed run.
+
+## 4. Things that will trip you up
+
+- **Never quote V100 numbers.** fp16 on sm_70 is smoke-testing only.
+- **`pythainlp` is pinned `<5.2`.** 5.2 changed newmm's dictionary and breaks exact parity with
+  the published ThaiOCRBench scores. Do not relax the pin without re-running
+  `tests/test_tob_parity.py`, which must stay at 0.01.
+- **DVC staleness:** the `prepare` stage depends on `configs/run.yaml`, `configs/datasets`,
+  `data/statements` and `ocr_bench/data`. Touching those marks the 7 GB run stale. If the change
+  cannot affect prepared output (for example a scoring-only key in `bankstmt.yaml`), regenerate
+  just `config.resolved.yaml` and `dvc commit -f prepare`; otherwise `dvc repro prepare`
+  (about 19 min) and `dvc push`. Always `dvc push` before committing a changed `dvc.lock`.
+- **Client data hygiene:** `data/`, `runs/` and `review/` stay gitignored; only the anonymised
+  samples in the report are client-facing. Never put real statement content in tests or fixtures.
+  Audit staged files for the key, `.dvc/config.local` and PDFs before each commit.
+- **CI is Drone** (`.drone.yml`, `docker` pipeline on push/PR to `main`). The repo must be
+  activated in https://drone.loolootest.com for builds to run; Gitea Actions is not used.
+- **Statement quirks already handled** (see `ocr_bench/normalize/statement.py` and
+  `metrics/statement_gt.py`): KBank's combined withdrawal/deposit column is split from the data,
+  not the header; TTB prints newest-first and signed amounts; BBL opens with a `B/F` row; KTB and
+  Krungsri PDFs have broken font encodings, so their text layers are unusable and those pages
+  carry no ground truth (27 usable digital pages in total).
+
+## 5. Planning artifacts
+
+`openspec/changes/add-ocr-benchmark-harness/` holds the proposal, design, per-capability specs and
+`tasks.md`, which is the authoritative checklist. Gitea issues #1–#8 mirror its task groups; tick
+both when a task is finished. `openspec validate add-ocr-benchmark-harness --strict` must pass.

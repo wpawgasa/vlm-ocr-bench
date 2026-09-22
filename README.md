@@ -50,6 +50,9 @@ uv run ocrbench infer --run-id <id>-dup
 uv run ocrbench dupset eval --dup-run-id <id>-dup      # -> runs/<id>-dup/duplicates.jsonl
 ```
 
+Continuing this work on another machine (H100/L4): see
+[docs/continuing-on-another-host.md](docs/continuing-on-another-host.md).
+
 ## Prepared data (DVC)
 
 The raw statements (`data/statements`) and the prepared run `data/runs/2026-09-22-a` are
