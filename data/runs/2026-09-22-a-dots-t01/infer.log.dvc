@@ -1,0 +1,5 @@
+outs:
+- md5: 9b45c3e95003e1fc8a0af3d64dd28c23
+  size: 304
+  hash: md5
+  path: infer.log

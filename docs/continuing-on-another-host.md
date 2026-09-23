@@ -4,6 +4,38 @@ State as of commit `bf8dab1` (2026-09-22). Everything that can be built and test
 benchmark GPU is done and on `main`: 569 tests, ruff clean. What is left needs an H100, an L4,
 or a human labeller.
 
+## 0. Status after the first H100 session (2026-09-23)
+
+Model line-up changed: **TeleOCR is dropped** because it cannot read Thai (see below). Typhoon
+OCR 1.5 is now a main model, and OvisOCR2 plus PaddleOCR-VL-1.6 are being added.
+
+| Model | Rows in `2026-09-22-a` | State |
+| --- | --- | --- |
+| dots.ocr | 6,846 / 6,846, 0 errors | done (vLLM 0.11.0, bf16) |
+| TeleOCR | 852 / 6,846 | stopped on purpose; kept as evidence |
+| typhoon_ocr15 | 342 / 6,846 | interrupted by a full disk; resume with `infer` |
+| OvisOCR2, PaddleOCR-VL-1.6 | — | not integrated yet; need vLLM ≥ 0.18 / ≥ 0.11.1 (plan: v0.22.1) |
+
+Findings so far (details and the evidence crop: `data/runs/2026-09-22-a/evidence/`, DVC-tracked):
+- **TeleOCR does not read Thai** in bf16 with its official sampling: 0% Thai characters on
+  statement pages; it reads the English and invents Korean/Chinese text instead. On a clean Thai
+  header crop it drops the Thai line, with `presence_penalty` 1.0 and 0.0 alike, so it is the
+  model, not the harness.
+- **dots.ocr loops on Thai:** 680 rows (9.9%) hit `max_tokens` 8192 at the spec's T=0, mostly
+  ThaiOCRBench repetition loops. The rerun of those rows at upstream's T=0.1 (sensitivity run
+  `2026-09-22-a-dots-t01`, model config `dotsocr_t01`, never a headline number) still caps 392 of
+  680, so the loops are mostly the model, not greedy decoding.
+
+**Results are DVC-tracked per file** (`data/runs/<run>/*.dvc`; `prepare` owns only img, gt,
+manifest and the two config files). With the hardlink cache these files are read-only, so run
+`dvc unprotect data/runs/2026-09-22-a/predictions.jsonl` **before** resuming `infer`, then
+`dvc add` + `dvc push` + commit the `.dvc` files after it. The sensitivity run's `img`, `gt`,
+`config.resolved.yaml` and `prepare_summary.json` are relative symlinks into `2026-09-22-a`
+(not tracked); recreate them after a pull.
+
+The raw statements (`data/statements`, `.dir` `c54d95d7…`) were never pushed to the DVC remote:
+`dvc status` shows them deleted on every other host. Push them from the V100 box.
+
 ## 1. Set the host up
 
 ```bash

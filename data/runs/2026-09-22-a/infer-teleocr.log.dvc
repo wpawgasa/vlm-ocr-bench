@@ -1,0 +1,5 @@
+outs:
+- md5: 2fdcc088039c8f1aadb8190fe09248ab
+  size: 186
+  hash: md5
+  path: infer-teleocr.log

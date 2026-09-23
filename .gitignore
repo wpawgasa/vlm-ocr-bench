@@ -19,6 +19,13 @@ build/
 /data/*
 !/data/*.dvc
 !/data/.gitignore
+# ...and the DVC pointers of per-run results (predictions etc., `dvc add`-ed per file)
+!/data/runs/
+/data/runs/*
+!/data/runs/*/
+/data/runs/*/*
+!/data/runs/*/*.dvc
+!/data/runs/*/.gitignore
 /review/
 *.pdf
 
