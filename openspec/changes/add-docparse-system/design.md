@@ -29,7 +29,7 @@ See proposal.md for motivation. Several facts about the current state shape this
 - Benchmark and training runs happen on one H100 (80 GB).
 - The V100 dev container has no CUDA, so unit tests must run on recorded responses.
 
-An adversarial design review (Fable 5.1, 2026-09-23) shaped decisions D3, D5–D10 and D12. The user accepted all its recommendations except dropping the FastAPI service.
+An adversarial design review (Fable 5.1, 2026-09-23) shaped decisions D3, D5–D10 and D12. The user accepted all its recommendations except dropping the FastAPI service. D7 was later revised to use the existing muocr checkpoint instead of training a model from scratch.
 
 ## Goals / Non-Goals
 
@@ -50,7 +50,7 @@ An adversarial design review (Fable 5.1, 2026-09-23) shaped decisions D3, D5–D
 ### D1. Package layout and reuse
 Add a new package, `docparse/`, with these modules:
 - `registry`, `classify`, `layout`, `segment`, `recognize/{base,paddle_crop,trocr}`, `reconcile`, `html`, `verify`, `extract/{tools,plans,agent,verify}`;
-- `trocr/{data,train,eval}`;
+- `trocr/{data,train}` (only for the conditional fine-tune);
 - `service/{cli,api}`, and `artifacts`.
 
 Configuration lives in `configs/docparse/pipeline.yaml` and `configs/docparse/classes/*.yaml`. docparse imports from `ocr_bench` (clients, parsers, normalizers, mapper, arithmetic). `ocr_bench` imports docparse only in its `docparse` adapter.
@@ -73,7 +73,7 @@ Pydantic models live in `docparse/schemas.py`. Artifacts are written atomically 
 | Classify; verifier crop reads | Qwen3-VL-8B-Instruct | new vLLM service `qwen3vl` |
 | Verifier field lookup; extraction agent | Qwen3-8B (tool calling, thinking off) | new vLLM service `qwen3` |
 | Text-line detection | PP-OCRv5 DB detector | in-process, GPU if available |
-| Line reading | `paddle_crop` or Thai TrOCR | pipeline service, or in-process |
+| Line reading | `paddle_crop` or Thai TrOCR (muocr checkpoint) | pipeline service, or in-process (PyTorch; ONNX optional) |
 
 The OCR VLMs are fixed-prompt models and cannot classify or answer focused prompts, hence the separate instruction-following VLM. All three vLLM servers share the H100 at `gpu-memory-utilization` 0.25 / 0.30 / 0.25. TrOCR and the detector use what is left.
 
@@ -94,29 +94,32 @@ Block ids are `p{page}-b{order}`.
 ### D6. Segmentation
 - The PP-OCRv5 DB detector runs on each non-figure block crop, and its line boxes are clipped to the block.
 - Table blocks use the Paddle table HTML (rows, cols, spans) to assign each detected line to a cell by the largest overlap with the cell. Cell geometry comes from the detector boxes grouped by row and column bands.
-- Lines wider than `max_aspect` (10) are split at the widest whitespace gaps, found from a column projection of the binarized crop.
+- Lines wider than `max_aspect` are split at the widest whitespace gaps, found from a column projection of the binarized crop. `max_aspect` defaults to the active reader's input aspect ratio: 6 for muocr's 64×384. For `paddle_crop`, which has no fixed input, it is 10.
 - If the detector finds no lines where the block has text, a horizontal projection-profile split is used, flagged `fallback`.
 
-### D7. Thai TrOCR
-**Model**
-- `VisionEncoderDecoderModel`.
-- Encoder: `microsoft/trocr-base-printed` (a DeiT-base/16 encoder, per the Fable review; confirm against the checkpoint config in task 4.1). It runs at **96×768** with interpolated position embeddings. Lines are resized preserving aspect ratio to height 96 and padded right to 768.
-- Decoder: **character-level, trained from scratch.** 6 layers, d=512, 8 heads, over a vocabulary of about 250 symbols: U+0E00–U+0E7F, ASCII printable, and `฿ € $ – — · •`, with NFC targets.
+### D7. Thai TrOCR (muocr)
+**Model (as delivered).** We use the existing fine-tuned checkpoint `models/muocr-base-26m-stage2-finetuned-20240820-v1` (gitignored; DVC/GCS, task 4.1). Its training data does not overlap the client statements or ThaiOCRBench (confirmed by the user, 2026-09-23). It is:
+- a `VisionEncoderDecoderModel` (transformers 4.43);
+- a ViT-base/16 encoder at a **64×384** input, 3 channels, normalized with mean and std 0.5;
+- a 2-layer TrOCR decoder, d=1024, 16 heads;
+- a 62,312-token Thai+English SentencePiece vocabulary (`source.spm`/`target.spm`, `vocab.json`);
+- an ONNX export (encoder, decoder, decoder-with-past).
 
-*Why character-level:* Thai subword vocabularies (XLM-R, WangchanBERTa) bring a large softmax and ambiguous segmentation around combining marks. Cross-attention would be freshly initialised either way. Per-character confidence also makes D8's alignment direct.
+*Why not the from-scratch character-level decoder from the first draft:* the checkpoint already reads Thai. Its own held-out results report mean CER 0.9% on PDF lines, 1.2% on scanned and 0.9% on camera. Those results are on forms, not statements; the per-row files were deleted because they contained personal data. So from-scratch training would spend GPU time to reach where muocr already is. What we do not know is how it reads **statement** lines, which Spike A and the gate measure.
 
-**Data**
-- 1.5–2M synthetic lines. Fonts: TLWG, Sarabun, Noto Sans Thai, Kanit. Text: Thai Wikipedia plus statement-shaped generators (amounts with separators, Thai and Gregorian dates, Thai month names, channel and description phrases). Degradations reuse `ocr_bench/data/degrade.py`.
-- At least 20k real crops from non-eval files only:
-  - text-layer lines (task 1.2 first tries to reclaim the 103 unusable pages, e.g. PUA glyphs);
-  - pseudo-labels where `paddle_crop` and typhoon crop reads agree exactly after normalization.
+**Inference**
+- Resize crops keeping aspect ratio to height 64, then pad right to 384 with the background colour. Segments are pre-split to at most 6:1 (D6), so nothing is squashed.
+- Decoding: beam 4, `max_new_tokens` 120 and **`no_repeat_ngram_size: 0`**. The checkpoint's default of 3 blocks repeated token trigrams, which corrupts amounts such as `1,000,000.00` and account numbers with repeated digits. Its own number set showed 40% exact match despite a 6% mean CER. Spike A measures numeric lines with both settings, and the setting is recorded in the reader version.
+- Confidence: each generated token's probability, taken from the beam's final scores, is assigned to every character that token decodes to. This gives the per-character confidences D8 calibrates.
+- Runtime: PyTorch on GPU in batches by default. The ONNX export is an optional CPU path for the service, and must reproduce the PyTorch text on the gate lines.
 
-**Training**
-- Stage 1: synthetic only. Stage 2: a mix of about 70% synthetic and 30% real.
-- AdamW with cosine decay, bf16, on the H100.
-- Held-out: 5% of synthetic data, plus real lines from non-training, non-eval files.
+**Conditional fine-tune (only if muocr fails the gate, task 4.4)**
+- Start from muocr and keep its tokenizer.
+- Data: about 150k synthetic statement-shaped lines plus at least 20k real crops, taken from non-eval files only. Synthetic lines use TLWG, Sarabun, Noto Sans Thai and Kanit fonts; the generators cover amounts with separators, Thai and Gregorian dates, Thai month names, and channel and description phrases; degradations reuse `ocr_bench/data/degrade.py`. Real crops are text-layer lines (after Spike B) and 2-of-2 pseudo-labels (`paddle_crop` and typhoon crop reads agreeing exactly), capped at 50%.
+- Training: a low learning rate (1e-5 to 3e-5) with AdamW and cosine decay, in bf16 on the H100. Held out: 5% of the synthetic data, plus real lines from files used neither for training nor for eval.
+- The fine-tuned checkpoint must pass the same gate.
 
-**Gate (spec line-recognition):** clean CER ≤ 2%, degraded CER ≤ 6%, and no worse than `paddle_crop` on the same lines. The relative condition is the one that matters. Otherwise the TrOCR branch adds latency without gain.
+**Gate (spec line-recognition):** clean CER ≤ 2%, degraded CER ≤ 6%, and no worse than `paddle_crop` on the same lines. The relative condition is the one that matters, because otherwise the TrOCR branch adds latency without gain.
 
 ### D8. Reconciliation by alignment voting
 1. For each segment, find its span in the block text: fuzzy-locate the reader text in the block text with `rapidfuzz` partial alignment, in reading order, and consume matched spans.
@@ -125,7 +128,7 @@ Block ids are `p{page}-b{order}`.
    - the field-type validator, when the segment belongs to a typed field or column (`amount`, `date`, `account`, via the mapper's column roles);
    - a third reading of that segment only: `paddle_crop` if the reader was TrOCR, TrOCR if a checkpoint exists, otherwise a Qwen3-VL crop read. The 2-of-3 exact match wins;
    - otherwise keep the line-reader text, with `data-disputed` set and `data-alt` holding the other readings.
-4. `data-conf` is the minimum over the segment's characters of each source's **isotonically calibrated** P(char correct). Calibration is fitted per source on the gate's held-out lines, and a source with no calibration gets no `data-conf` for its own contribution. Raw logprobs are never compared across sources.
+4. `data-conf` is the minimum over the segment's characters of each source's **isotonically calibrated** P(char correct). For muocr, the per-character input is its token probability spread over the token's characters (D7). Calibration is fitted per source on the gate's held-out lines, and a source with no calibration gets no `data-conf` for its own contribution. Raw logprobs are never compared across sources.
 
 **HTML**
 - A `<section data-page>` per page; `<h*>` for titles; `<p>` per text block, with `<span>` per segment; `<table>` with spans.
@@ -177,7 +180,7 @@ Qwen3-8B via the vLLM OpenAI tool-calling API, temperature 0.
 |---|---|
 | Layout | 2–6 s (4 pipeline replicas) |
 | Detection | ≈0.1 s |
-| Line reading | TrOCR 1–2 s for about 300 segments batched; `paddle_crop` 3–8 s |
+| Line reading | muocr 2–4 s for about 300 segments batched with beam 4 (to be measured in Spike A); `paddle_crop` 3–8 s |
 | Classify | 1 call per document |
 
 The happy path totals about 10–20 s per page. The verifier's worst case is 12 VLM calls per document. Extraction takes 2–4 LLM calls for template queries and at most 8 tool calls for free-form ones.
@@ -193,11 +196,13 @@ The service processes pages of a document concurrently, up to a configured limit
 ## Risks / Trade-offs
 
 - **[The eval set is small and dominated by one bank]** → Report per bank, and state the CI width. The manual anchor set (ocr_bench 5.8) is on the critical path, so its labelling starts in task group 1.
-- **[TrOCR never beats `paddle_crop`]** → The reader interface makes that outcome cheap. `paddle_crop` stays the default, and the report says so. TrOCR training starts only after Spike A has measured the baseline's CER.
+- **[muocr was trained on forms, not statements]** → Its CER on statement lines, dense numeric columns and long descriptions is unknown until Spike A. The gate decides. If it fails, a conditional fine-tune starts from muocr, not from scratch.
+- **[TrOCR never beats `paddle_crop`, even after fine-tuning]** → The reader interface makes that outcome cheap. `paddle_crop` stays the default, and the report says so.
+- **[Trigram blocking corrupts numbers]** → Decoding sets `no_repeat_ngram_size: 0`, and Spike A checks numeric lines with both settings.
 - **[Three vLLM servers on one H100 contend for memory and compute]** → Fixed memory fractions (D3). Qwen3-VL and Qwen3 are idle on the happy path. The measured throughput goes in the report.
 - **[The verifier cannot reach `complete` on degraded photos]** → The field states make that visible as `unverified` or `absent`, never as a wrong value. The review queue can consume `unverified` fields later.
 - **[An 8B LLM misroutes queries]** → Routing is scored on the Q/A set. Parameters are schema-validated, and a wrong plan fails verification rather than returning a wrong value.
-- **[Pseudo-labels copy shared reader errors into TrOCR training]** → An exact 2-of-2 agreement is required, and pseudo-labelled lines are capped at 50% of the real crops.
+- **[Pseudo-labels copy shared reader errors into the conditional fine-tune]** → An exact 2-of-2 agreement is required, and pseudo-labelled lines are capped at 50% of the real crops.
 
 ## Migration Plan
 

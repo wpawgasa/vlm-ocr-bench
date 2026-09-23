@@ -24,11 +24,11 @@ For table blocks, each segment SHALL also carry its row and column indices.
 - **THEN** each segment carries its row and column indices, taken from the block's table structure
 
 ### Requirement: Aspect-ratio limit
-No segment SHALL exceed the configured maximum width-to-height ratio (default 10:1). A longer line SHALL be split at its widest internal whitespace gaps. A table cell SHALL be split only if the cell itself exceeds the limit.
+No segment SHALL exceed the configured maximum width-to-height ratio. By default, this is the active line reader's input aspect ratio: 6:1 for the muocr checkpoint's 64×384 input, and 10:1 for a reader with no fixed input size. A longer line SHALL be split at its widest internal whitespace gaps. A table cell SHALL be split only if the cell itself exceeds the limit.
 
 #### Scenario: Long description line
-- **WHEN** a detected line is 1500×30 px and the limit is 10:1
-- **THEN** it is split at whitespace gaps into segments that are each at most 300 px wide, and together they cover the original line
+- **WHEN** a detected line is 1500×30 px and the active reader is muocr (limit 6:1)
+- **THEN** it is split at whitespace gaps into segments that are each at most 180 px wide, and together they cover the original line
 
 ### Requirement: Detector fallback
 If the text-line detector finds no lines in a non-figure block that has text, the system SHALL fall back to a projection-profile split. The system SHALL flag the segments it produced with `fallback`.

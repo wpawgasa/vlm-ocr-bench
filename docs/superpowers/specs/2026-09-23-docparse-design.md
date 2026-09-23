@@ -28,7 +28,7 @@ query + parsed doc ─► route query type ─► plan template ─► tools ─
 
 - **Pipeline 1, parsing.** Each stage writes a typed, cached artifact per document (`runs/docparse/<doc_id>/`). Only the verifier is agentic, with at most 3 retries per field and 12 VLM calls per document.
 - **Pipeline 2, extraction.** A small LLM routes the query to a plan template, fills its parameters, and calls tools over the parse. Read values are re-matched in the cited block; computed values are recomputed in `Decimal`. If verification fails, the answer is `unverified`/`absent` rather than a guess.
-- **Thai TrOCR.** A TrOCR printed encoder at 96×768 plus a character-level Thai decoder, trained on synthetic lines and non-eval statement crops. It replaces `paddle_crop` only if it passes the gate: CER ≤ 2% clean, ≤ 6% degraded, and no worse than `paddle_crop`.
+- **Thai TrOCR (muocr).** The existing checkpoint `muocr-base-26m-stage2-finetuned-20240820-v1` (a ViT encoder at 64×384 with a Thai+English SentencePiece decoder) is used as-is, with trigram blocking turned off so repeated digits survive. It replaces `paddle_crop` only if it passes the gate: CER ≤ 2% clean, ≤ 6% degraded, and no worse than `paddle_crop`. A fine-tune starting from muocr on statement lines runs only if it fails.
 - **Service.** `docparse parse | extract | gate` CLI, and a FastAPI app (`POST /parse`, `POST /extract`).
 
 ## Key decisions and why
@@ -40,10 +40,11 @@ query + parsed doc ─► route query type ─► plan template ─► tools ─
 | Paddle layout by default; never dots `layout_only` | No loops, table HTML; reconciliation needs a second text reading |
 | Alignment voting instead of comparing confidences | Model confidences are not on a common scale; Paddle returns none |
 | A recovery needs 2 agreeing readers and a passing validator | Prevents the verifier from inventing values |
-| TrOCR gated against `paddle_crop` | Its value is unproven; the reader interface keeps the fallback cheap |
+| TrOCR gated against `paddle_crop` | muocr was trained on forms, not statements; the reader interface keeps the fallback cheap |
+| Reuse muocr instead of training from scratch | It already reads Thai at about 1% CER on printed form lines; fine-tune only if the gate fails |
 | Frozen, file-level eval list; paired bootstrap per condition and bank | Only 27 text-layer pages exist (21 from one file), so leakage would make the result meaningless |
 
-These decisions were reviewed adversarially by Fable 5.1 on 2026-09-23. The user accepted all of its recommendations and kept the FastAPI service.
+These decisions were reviewed adversarially by Fable 5.1 on 2026-09-23. The user accepted all of its recommendations and kept the FastAPI service. The TrOCR plan was then revised to use the existing muocr checkpoint.
 
 ## Success criterion
 

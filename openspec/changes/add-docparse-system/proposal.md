@@ -21,13 +21,13 @@ The `ocr_bench` harness is already in place, so docparse can be scored against t
   1. **Classify**: an instruction-following VLM assigns a registry class.
   2. **Layout**: layout blocks with bbox, category, reading order and a first text reading. The PaddleOCR-VL pipeline is the default and dots.ocr `prompt_layout_all_en` the alternative.
   3. **Segment**: blocks are split into line segments, with a maximum aspect ratio.
-  4. **Recognize**: a pluggable line reader reads each segment. `paddle_crop` is the baseline and a Thai-trained TrOCR is the target backend.
+  4. **Recognize**: a pluggable line reader reads each segment. `paddle_crop` is the baseline and the existing Thai TrOCR checkpoint (muocr) is the target backend.
   5. **Reconcile**: character-alignment voting merges the readings into HTML that carries bbox, page, confidence, source and dispute attributes.
   6. **Verify**: a bounded verifier agent checks the required fields of the class. It crops and re-reads missing or invalid fields, and accepts a recovery only when two readers agree and the validator passes.
-- **Thai TrOCR**:
-  - The model: a TrOCR printed encoder at a rectangular 96×768 input, plus a character-level Thai decoder trained from scratch.
-  - Its training data: synthetic lines plus real statement crops, never taken from eval files.
-  - Its gate: absolute CER targets **and** no worse than `paddle_crop` on the same held-out lines. It becomes the default reader only if it passes.
+- **Thai TrOCR (muocr)**:
+  - The model: the existing fine-tuned checkpoint `muocr-base-26m-stage2-finetuned-20240820-v1` (a ViT encoder at 64×384 with a Thai+English SentencePiece decoder). It is used as-is, and nothing is trained from scratch.
+  - Its gate: absolute CER targets **and** no worse than `paddle_crop` on the same held-out statement lines. It becomes the default reader only if it passes.
+  - A stage-3 fine-tune from muocr on statement-shaped lines (synthetic plus real crops, never from eval files) runs **only if muocr fails the gate**, and must then pass the same gate.
 - **Extraction pipeline**: a small LLM (Qwen3-8B) with tool calls over the parse (`outline`, `find`, `get_block`, `get_field`, `get_table`, `table_query`, `compute`).
   - Query types map to plan templates, and the LLM fills in their parameters. A free-form plan is only a flagged fallback.
   - Read values are verified by normalized match in the cited block. Computed values are verified by recomputation from the cited rows.
@@ -55,7 +55,7 @@ Non-goals:
 - `layout-analysis`: layout blocks with bbox, category, reading order and a first text reading, through pluggable layout backends.
 - `line-segmentation`: splitting layout blocks into line segments that respect the reader's geometry limits.
 - `line-recognition`: the line-reader contract, the `paddle_crop` and `trocr` backends, and the gate that promotes TrOCR to the default reader.
-- `trocr-thai-training`: the Thai TrOCR training data (synthetic and real), the leakage rules, training outputs and evaluation.
+- `trocr-thai-training`: the conditional fine-tune of the TrOCR checkpoint (when it runs, its base checkpoint, training data, leakage rules and reproducible outputs).
 - `parse-reconciliation`: merging readings by alignment voting and the parsed-HTML output contract.
 - `field-verification`: the verifier agent loop, field states, recovery guards, budgets and the audit trail.
 - `query-extraction`: the extraction agent harness, its tools, query-type plans, provenance, verification and abstention.
@@ -77,6 +77,7 @@ Non-goals:
 - **Serving**: two new vLLM services, Qwen3-VL-8B-Instruct (classify, verifier crop reads) and Qwen3-8B (field lookup, extraction), alongside the PaddleOCR-VL pipeline. They all share one H100 at reduced `gpu-memory-utilization`. TrOCR and the PP-OCRv5 text detector run in-process.
 - **Dependencies**:
   - `transformers`, `torch`, `paddleocr` (detector only), `fastapi`, `uvicorn`.
-  - Training only: `trdg`-style rendering with the Thai fonts already in the image, and `datasets`.
-- **Data**: bank statements stay client data under gitignored `data/` and `runs/`. TrOCR checkpoints go to the DVC GCS remote and are never committed. The frozen eval file list is committed as ids only.
-- **Compute**: H100 for layout, VLM and LLM serving, TrOCR training (about 1.5–2M synthetic lines) and evaluation. The V100 dev box handles unit tests and CPU-only stages.
+  - Conditional fine-tune only: `trdg`-style rendering with the Thai fonts already in the image, and `datasets`.
+  - Optional: `onnxruntime` for the checkpoint's ONNX export (a CPU path for the service).
+- **Data**: bank statements stay client data under gitignored `data/` and `runs/`. TrOCR checkpoints (muocr and any fine-tune) live under the gitignored `models/` and on the DVC GCS remote, and are never committed. The frozen eval file list is committed as ids only.
+- **Compute**: H100 for layout, VLM and LLM serving, evaluation, and the conditional muocr fine-tune (about 200k lines, only if gated out). The V100 dev box handles unit tests and CPU-only stages.
