@@ -1,5 +1,5 @@
 outs:
-- md5: f76c94fc32527c4cbd941646321d005b
-  size: 4096
+- md5: 4a20e62d68c48ec4636799bfab3c1529
+  size: 1807
   hash: md5
   path: infer-typhoon.log

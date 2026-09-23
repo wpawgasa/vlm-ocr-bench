@@ -13,7 +13,7 @@ OCR 1.5 is now a main model, and OvisOCR2 plus PaddleOCR-VL-1.6 are being added.
 | --- | --- | --- |
 | dots.ocr | 6,846 / 6,846, 0 errors | done (vLLM 0.11.0, bf16) |
 | TeleOCR | 852 / 6,846 | stopped on purpose; kept as evidence |
-| typhoon_ocr15 | in progress | resumed after a full-disk crash (v0.11.0) |
+| typhoon_ocr15 | 6,846 / 6,846, 0 errors | done (vLLM 0.11.0, bf16); 449 rows hit max_tokens, 457 KIE replies not JSON |
 | OvisOCR2, PaddleOCR-VL-1.6 | — | integrated and unit-tested (tasks 3.10, 3.13); serve on v0.22.1 (3.11), OvisOCR2 Thai gate first (3.12) |
 
 Serving the new models (single GPU: stop the current server first):
