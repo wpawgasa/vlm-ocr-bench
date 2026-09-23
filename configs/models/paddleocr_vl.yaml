@@ -1,0 +1,48 @@
+# PaddleOCR-VL-1.6 (PaddlePaddle/PaddleOCR-VL-1.6, 0.9B, PaddleOCRVLForConditionalGeneration).
+# Officially a two-stage pipeline: PP-DocLayoutV3 finds blocks, labels and reading order, then
+# the VLM reads each crop with its label's prompt ("OCR:", "Table Recognition:" -> OTSL -> HTML,
+# "Formula Recognition:", ...). That pipeline runs unmodified in the `paddle_pipeline` service:
+# PaddleX's official serving app (`/layout-parsing`, pipeline config PaddleOCR-VL-1.6.yaml with
+# its VL recognition pointed at our vLLM server). Every OCR task is one request to it; the
+# pipeline returns no tokens or logprobs, so this model has no confidence signal.
+# Question tasks (kie/classify) go straight to the vLLM server with the question as prompt:
+# the model claims no QA, and this matches how the other document parsers are treated.
+# vLLM served name must be PaddleOCR-VL-1.6-0.9B: the pipeline requests that model name.
+# Needs vLLM >= 0.11.1. Policy table: openspec model-inference spec.
+endpoint_env: PADDLEOCR_VL_BASE_URL
+served_model_name: PaddleOCR-VL-1.6-0.9B
+image_resize: none
+sampling:
+  max_tokens: 8192  # PaddleX default max_completion_tokens for vllm-server
+  temperature: 0.0
+pipeline:
+  endpoint_env: PADDLE_PIPELINE_URL
+  path: /layout-parsing
+  health_path: /health
+  request:
+    visualize: false             # no rendered layout images in the response
+    returnMarkdownImages: false  # output only; recognition is unchanged
+  timeout_s: 300
+
+x-question: &question
+  kind: question
+  version: question-v1
+  parser: json_fields
+
+plans:
+  ocr_fullpage: &pipeline_plan
+    kind: pipeline
+    version: paddle-vl16-pipeline-v1
+    parser: paddle_layout
+  docparse: *pipeline_plan
+  statement: *pipeline_plan
+  table: *pipeline_plan
+  ocr_line: *pipeline_plan
+  handwriting: *pipeline_plan
+  "ocr_line@Fine-grained text recognition":
+    kind: crop_pipeline
+    version: paddle-vl16-pipeline-crop-v1
+    parser: paddle_layout
+  kie: *question
+  kie_map: *question
+  classify: *question

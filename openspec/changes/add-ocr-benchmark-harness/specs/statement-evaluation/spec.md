@@ -67,10 +67,10 @@ Decimal arithmetic SHALL be exact.
 - **THEN** the file gets a `page_gap` flag
 
 ### Requirement: Check C — cross-model agreement
-For each field and row that appears in both models' outputs for the same page and condition, the system SHALL record `agree` when the normalized values match. It SHALL report the agreement rate per model pair as its own column.
+For each pair of models in the run, and each field and row that appears in both models' outputs for the same page and condition, the system SHALL record `agree` when the normalized values match. It SHALL report the agreement rate per model pair as its own column.
 
 #### Scenario: Missing in one model
-- **WHEN** a field is present in TeleOCR's output but absent in dots.ocr's
+- **WHEN** a field is present in typhoon-ocr1.5's output but absent in dots.ocr's
 - **THEN** the field's agreement is null (not counted as agree or disagree)
 
 ### Requirement: Review queue and manual anchor set

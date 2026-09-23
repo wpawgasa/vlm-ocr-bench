@@ -119,11 +119,12 @@ class NormalizedPage(BaseModel):
 
 class RawCall(BaseModel):
     """One request of a page's pipeline, verbatim (TeleOCR pages have one layout call plus
-    one call per block; every other plan has a single call)."""
+    one call per block; a `pipeline` plan has one call to the vendor pipeline server, which
+    returns no tokens; every other plan has a single call)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["single", "layout", "block"]
+    kind: Literal["single", "layout", "block", "pipeline"]
     block_index: int | None = None
     block_type: str | None = None
     text: str = ""

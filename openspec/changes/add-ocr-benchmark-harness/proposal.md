@@ -9,6 +9,8 @@ The client (บสย. / LooLoo) asked us to evaluate TeleOCR and dots.ocr again
 
 This change turns that spec into a working, reproducible pipeline.
 
+**Model line-up after the first H100 run (2026-09-23).** TeleOCR cannot read Thai: in bf16 with its official sampling it emits no Thai characters on statement pages and drops a clean Thai header crop whatever the presence penalty. It is screened out, and its partial run (852 rows) is kept as evidence for the client. The benchmark now compares Thai-capable document parsers: dots.ocr, typhoon-ocr1.5-2b, OvisOCR2 and PaddleOCR-VL-1.6.
+
 ## What Changes
 
 - Add the `ocr_bench` Python package (Python 3.11, `uv`, `typer`, `pydantic`, `pytest`) and an `ocrbench` CLI. The CLI has the stages `prepare`, `infer`, `probe`, `score`, `calibrate`, `bench-latency` and `report`.
@@ -18,7 +20,7 @@ This change turns that spec into a working, reproducible pipeline.
   - Ingest bank statements: route each file to digital, scanned or photo; rasterize at 200 dpi; use the PDF text layer as ground truth.
   - Apply three deterministic image degradations: `clean`, `scan_low` and `photo`.
   - Write a manifest with one row per `(sample, condition)`.
-- **Model adapters** for TeleOCR and dots.ocr, both called through vLLM OpenAI-compatible endpoints. Adapters use each model's native prompts and pipelines (TeleOCR's two-stage layout-then-block parse), with the benchmark question as fallback where no native mode exists. Every request plan carries a version tag. Adapters record logprobs, use a timeout with one retry, and write explicit error rows (no silent drops). An optional third adapter covers `typhoon-ocr1.5-2b`. A capability probe fills the Q4 matrix.
+- **Model adapters** for dots.ocr, typhoon-ocr1.5-2b, OvisOCR2 and PaddleOCR-VL-1.6, called through vLLM OpenAI-compatible endpoints; PaddleOCR-VL's official two-stage pipeline runs as PaddleX's own HTTP pipeline server in front of its vLLM endpoint. Adapters use each model's native prompts and pipelines, with the benchmark question as fallback where no native mode exists. Every request plan carries a version tag. Adapters record logprobs where the endpoint returns them, use a timeout with one retry, and write explicit error rows (no silent drops). The TeleOCR adapter (two-stage layout-then-block parse) stays available but is not in the run. A capability probe fills the Q4 matrix.
 - **Normalization:**
   - Thai NFC text canonicalization.
   - Field rules: dates with Buddhist-year conversion, amounts, account numbers.
@@ -61,6 +63,7 @@ Non-goals: fine-tuning either model, building the LooLoo production pipeline, VQ
 - **New code:** `pyproject.toml`, `ocr_bench/` (data, models, normalize, metrics, confidence, latency, report), `configs/`, `tests/`.
 - **Existing files:**
   - `scripts/serve_{teleocr,dotsocr}.sh` and `.devcontainer/compose.yaml` already serve the models with the required vLLM flags; TeleOCR additionally needs its `TeleOCR_vllm` plugin in the serving image. The harness only consumes `$TELEOCR_BASE_URL`, `$DOTSOCR_BASE_URL` and `$TYPHOON_BASE_URL`.
+  - OvisOCR2 and PaddleOCR-VL-1.6 need a newer vLLM than the pinned v0.11.0, so compose serves them on `VLLM_IMAGE_NEW` (v0.22.1), with `scripts/serve_{ovisocr2,paddleocr_vl}.sh`. PaddleOCR-VL adds a CPU pipeline image, `.devcontainer/paddle-pipeline.Dockerfile`. The harness consumes `$OVISOCR2_BASE_URL`, `$PADDLEOCR_VL_BASE_URL` and `$PADDLE_PIPELINE_URL`.
   - `README.md` gains a reproduce section.
 - **Dependencies:**
   - Python packages: `typer`, `pydantic`, `httpx`/`openai`, `datasets`, `pdfplumber`, `pillow`, `opencv-python-headless`, `numpy`, `pythainlp`, `rapidfuzz`, `apted` or `zss`, `scikit-learn`, `imagehash`, `openpyxl`, `matplotlib`, `pytest`.

@@ -140,6 +140,41 @@ class FakeChatClient:
         )
 
 
+class FakePipelineClient:
+    """Stands in for `PipelineClient`: `responder(image)` returns the page-result JSON text
+    (success) or an Exception instance (the request failed for good)."""
+
+    def __init__(self, responder: Callable[..., Any], healthy: bool = True):
+        self.responder = responder
+        self.healthy = healthy
+        self.calls: list[Any] = []
+
+    async def health(self) -> None:
+        from ocr_bench.models.vllm_client import EndpointUnavailable
+
+        if not self.healthy:
+            raise EndpointUnavailable("fake-pipeline", "http://fake:8080")
+
+    async def layout(self, image):
+        import time
+
+        from ocr_bench.models.pipeline_client import PipelineResult
+
+        self.calls.append(image)
+        started = time.perf_counter()
+        out = self.responder(image)
+        ended = time.perf_counter()
+        if isinstance(out, BaseException):
+            return PipelineResult(error=str(out), attempts=2, started=started, ended=ended)
+        return PipelineResult(
+            text=out,
+            latency_ms=(ended - started) * 1000,
+            attempts=1,
+            started=started,
+            ended=ended,
+        )
+
+
 def make_run(data_dir, run_id: str, rows: list) -> Any:
     """Write `rows` (ManifestRow) as a run's manifest plus a small PNG per image_path."""
     from PIL import Image

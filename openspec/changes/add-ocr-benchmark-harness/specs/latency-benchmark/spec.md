@@ -14,7 +14,7 @@ Measures per-page latency and throughput of each served model on each GPU type a
 - **THEN** `latency.jsonl` has 200 non-warm-up page rows for each (model, gpu, concurrency)
 
 ### Requirement: Per-page timing record
-Each timing row SHALL describe one page: `model`, `gpu`, `concurrency`, `sample_id`, end-to-end `latency_ms`, `ttft_ms`, `n_requests`, `prompt_tokens`, `completion_tokens`, `image_px` and `error`. For a multi-request page (TeleOCR two-stage), `latency_ms` SHALL cover all its requests and `ttft_ms` SHALL be taken from its first request. Client concurrency SHALL count pages in flight.
+Each timing row SHALL describe one page: `model`, `gpu`, `concurrency`, `sample_id`, end-to-end `latency_ms`, `ttft_ms`, `n_requests`, `prompt_tokens`, `completion_tokens`, `image_px` and `error`. For a multi-request page (TeleOCR two-stage), `latency_ms` SHALL cover all its requests and `ttft_ms` SHALL be taken from its first request. For a page sent to a vendor pipeline server (PaddleOCR-VL), `latency_ms` SHALL be the wall clock of that request, including the pipeline's CPU layout stage, and `ttft_ms` SHALL be null because the pipeline does not stream. Client concurrency SHALL count pages in flight.
 
 #### Scenario: Streaming TTFT
 - **WHEN** a page completes
@@ -23,6 +23,10 @@ Each timing row SHALL describe one page: `model`, `gpu`, `concurrency`, `sample_
 #### Scenario: Two-stage page timing
 - **WHEN** a TeleOCR page needs 1 layout request and 5 block requests
 - **THEN** its row has `n_requests=6` and `latency_ms` spans from the first request's start to the last request's end
+
+#### Scenario: Pipeline page timing
+- **WHEN** a PaddleOCR-VL page is timed
+- **THEN** its row has `n_requests=1`, `ttft_ms` null, and `latency_ms` covering the whole pipeline request
 
 ### Requirement: Throughput summary and GPU memory
 For each (model, gpu, concurrency), the system SHALL report:
@@ -39,11 +43,15 @@ When GPU sampling is unavailable, peak memory SHALL be reported as unavailable, 
 - **THEN** the summary marks peak memory "unavailable" and the latency results are still written
 
 ### Requirement: Hardware and precision discipline
-Runs SHALL record the GPU type, vLLM version and dtype. H100 80 GB and L4 24 GB SHALL use the same vLLM version and bf16. A quantized row on L4 SHALL be allowed only for a released quantized checkpoint named in configuration. The harness SHALL NOT quantize models itself.
+Runs SHALL record the GPU type, vLLM version and dtype. For each model, H100 80 GB and L4 24 GB SHALL use the same vLLM version and bf16. Models served on different vLLM versions (model-inference spec: dots.ocr and typhoon on v0.11.0, OvisOCR2 and PaddleOCR-VL on v0.22.1) SHALL be shown with their version beside every latency figure, and the report SHALL NOT rank their latency against each other without that annotation. A quantized row on L4 SHALL be allowed only for a released quantized checkpoint named in configuration. The harness SHALL NOT quantize models itself.
 
 #### Scenario: Mismatched environment
-- **WHEN** H100 and L4 runs report different vLLM versions
+- **WHEN** H100 and L4 runs of the same model report different vLLM versions
 - **THEN** the report shows a warning beside the Q8 table
+
+#### Scenario: Mixed versions across models
+- **WHEN** the Q8 table holds models served on v0.11.0 and on v0.22.1
+- **THEN** each model's row states its vLLM version and the table carries a note that cross-version latency is not like for like
 
 ### Requirement: Multi-page document latency
 The system SHALL time 10 multi-page statement files end to end, including per-page inference and page merge. It SHALL report per-document p50 and p95.

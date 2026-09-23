@@ -93,6 +93,18 @@ def test_infer_writes_config_infer_yaml(run_dir, fakes):
     assert set(cfg["models"]) == {"dotsocr", "teleocr"}
 
 
+def test_infer_records_server_versions(run_dir, fakes):
+    class Versioned(FakeOcrModel):
+        async def server_version(self) -> str:
+            return "0.11.0"
+
+    fakes["dotsocr"] = Versioned("dotsocr")
+    assert _infer("--models", "dotsocr,teleocr").exit_code == 0
+    cfg = yaml.safe_load((run_dir.root / "config.infer.yaml").read_text(encoding="utf-8"))
+    assert cfg["models"]["dotsocr"]["vllm_version"] == "0.11.0"
+    assert cfg["models"]["teleocr"]["vllm_version"] == "unknown"  # no version reported
+
+
 def test_resume_after_interruption_requests_only_missing_rows(run_dir, monkeypatch):
     crashing = FakeOcrModel(
         "teleocr", behaviour=lambda n, row: SimulatedCrash() if n == 4 else "ok"

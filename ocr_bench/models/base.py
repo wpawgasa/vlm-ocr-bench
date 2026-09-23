@@ -1,8 +1,10 @@
 """`OcrModel` protocol and `PlannedModel`, which executes a model's request plans.
 
 A request plan (config `RequestPlan`) says how one model handles one (task, subtask):
-`single`, `crop_single`, `grounding`, `question` (one request each) or `two_stage`
-(TeleOCR: one layout request, then one request per block). Whatever the plan, a page
+`single`, `crop_single`, `grounding`, `question` (one request each), `two_stage`
+(TeleOCR: one layout request, then one request per block) or `pipeline` /
+`crop_pipeline` (one request to a vendor pipeline server, e.g. PaddleOCR-VL's, which calls
+the model itself). Whatever the plan, a page
 yields exactly one `PredictionRow` whose `latency_ms` is the wall clock from the first
 request's start to the last request's end, with tokens summed over its requests.
 
@@ -15,7 +17,7 @@ from typing import Protocol, runtime_checkable
 
 from PIL import Image
 
-from ocr_bench.config import ModelConfig, RequestPlan, Sampling
+from ocr_bench.config import PIPELINE_KINDS, ModelConfig, RequestPlan, Sampling
 from ocr_bench.models.imaging import (
     Region,
     crop_block,
@@ -34,6 +36,7 @@ from ocr_bench.models.parsers import (
     parse_teleocr_layout,
     teleocr_page,
 )
+from ocr_bench.models.pipeline_client import PipelineClient
 from ocr_bench.models.vllm_client import CallResult
 from ocr_bench.schemas import ManifestRow, NormalizedPage, PredictionRow, RawCall, RawPrediction
 
@@ -91,12 +94,17 @@ class PlannedModel:
     shapes, prompts, pre-resize and sampling all come from the config.
     """
 
-    def __init__(self, cfg: ModelConfig, client: ChatClient):
+    def __init__(
+        self, cfg: ModelConfig, client: ChatClient, pipeline: PipelineClient | None = None
+    ):
         unknown = sorted({p.parser for p in cfg.plans.values()} - set(PARSERS))
         if unknown:
             raise ValueError(f"model '{cfg.name}' names unknown parser(s): {unknown}")
+        if cfg.pipeline is not None and pipeline is None:
+            raise ValueError(f"model '{cfg.name}' has a pipeline endpoint but no pipeline client")
         self.cfg = cfg
         self.client = client
+        self.pipeline = pipeline
         self.name = cfg.name
 
     # --- hooks ------------------------------------------------------------------------------
@@ -105,7 +113,13 @@ class PlannedModel:
         """Model-level pre-resize of an image before it is sent."""
         if self.cfg.image_resize == "smart_resize":
             w, h = image.size
-            new_h, new_w = smart_resize(h, w, max_pixels=self.cfg.max_pixels or 11_289_600)
+            new_h, new_w = smart_resize(
+                h,
+                w,
+                factor=self.cfg.resize_factor,
+                min_pixels=self.cfg.min_pixels or 3136,
+                max_pixels=self.cfg.max_pixels or 11_289_600,
+            )
             if (new_w, new_h) != (w, h):
                 image = image.resize((new_w, new_h), Image.BICUBIC)
         elif self.cfg.image_resize == "max_side":
@@ -120,6 +134,13 @@ class PlannedModel:
 
     async def health(self) -> None:
         await self.client.health()
+        if self.pipeline is not None:
+            await self.pipeline.health()
+
+    async def server_version(self) -> str:
+        """vLLM version of the model's endpoint (model-inference spec), or "unknown"."""
+        version = getattr(self.client, "version", None)
+        return await version() if version is not None else "unknown"
 
     async def predict(self, row: ManifestRow, image: Image.Image) -> PredictionRow:
         return await self.predict_with_plan(row, image, self.cfg.plan_for(row.task, row.subtask))
@@ -131,6 +152,8 @@ class PlannedModel:
             image = image.convert("RGB")
             if plan.kind == "two_stage":
                 return await self._two_stage(row, image, plan)
+            if plan.kind in PIPELINE_KINDS:
+                return await self._pipeline(row, image, plan)
             return await self._single(row, image, plan)
         except Exception as exc:  # never drop a page
             return self._row(
@@ -174,6 +197,36 @@ class PlannedModel:
             return self._row(row, plan, calls, "", NormalizedPage(), result.error)
 
         ctx = ParseContext(task=row.task, orig_size=work.size, sent_size=sent.size)
+        normalized = parse(plan.parser, result.text, ctx)
+        if note is not None:
+            normalized.parse_error = (
+                note if normalized.parse_error is None else f"{note}; {normalized.parse_error}"
+            )
+        return self._row(row, plan, calls, result.text, normalized, None)
+
+    async def _pipeline(self, row: ManifestRow, image: Image.Image, plan: RequestPlan):
+        assert self.pipeline is not None  # guaranteed by ModelConfig validation + __init__
+        note: str | None = None
+        work = image
+        if plan.kind == "crop_pipeline":
+            region = parse_region(row.question)
+            if region is None:
+                note = NO_REGION
+            else:
+                work = resize_by_need(crop_region(image, region))
+        result = await self.pipeline.layout(work)
+        call = CallResult(
+            text=result.text,
+            latency_ms=result.latency_ms,
+            error=result.error,
+            attempts=result.attempts,
+            started=result.started,
+            ended=result.ended,
+        )
+        calls = [(_raw_call(call, "pipeline"), call)]
+        if result.error is not None:
+            return self._row(row, plan, calls, "", NormalizedPage(), result.error)
+        ctx = ParseContext(task=row.task, orig_size=work.size, sent_size=work.size)
         normalized = parse(plan.parser, result.text, ctx)
         if note is not None:
             normalized.parse_error = (

@@ -1,0 +1,48 @@
+# OvisOCR2 (ATH-MaaS/OvisOCR2, 0.85B, Qwen3.5 base: Qwen3_5ForConditionalGeneration).
+# End-to-end: one call per page. Prompt, sampling and image bounds follow the model card's
+# official `OvisOCR2Parser` (huggingface.co/ATH-MaaS/OvisOCR2); its post-processing (drop the
+# image-tag paragraphs, cut a repeated tail) is the `ovis_markdown` parser. The card passes
+# min/max pixels as vLLM `mm_processor_kwargs`; here the image is pre-resized to the same
+# bounds (factor 32 = patch 16 x spatial merge 2), which the server's processor then keeps.
+# No system prompt (the card's chat template has none); non-thinking is the template default.
+# The card claims no question answering: kie/classify get the generic question plan, like
+# the other document parsers. Needs vLLM >= 0.18 (Qwen3.5 + --gdn-prefill-backend).
+# Policy table: openspec model-inference spec.
+endpoint_env: OVISOCR2_BASE_URL
+served_model_name: ovisocr2
+image_resize: smart_resize
+resize_factor: 32
+min_pixels: 200704  # 448 * 448
+max_pixels: 8294400  # 2880 * 2880
+sampling:
+  max_tokens: 16384
+  temperature: 0.0
+
+x-ovis-prompt: &ovis_prompt '
+
+  Extract all readable content from the image in natural human reading order and output the result as a single Markdown document. For charts or images, represent them using an HTML image tag: <img src="images/bbox_{left}_{top}_{right}_{bottom}.jpg" />, where left, top, right, bottom are bounding box coordinates scaled to [0, 1000). Format formulas as LaTeX. Format tables as HTML: <table>...</table>. Transcribe all other text as standard Markdown. Preserve the original text without translation or paraphrasing.'
+
+x-question: &question
+  kind: question
+  version: question-v1
+  parser: json_fields
+
+plans:
+  ocr_fullpage: &ovis_plan
+    kind: single
+    version: ovis-parse-v1
+    prompt: *ovis_prompt
+    parser: ovis_markdown
+  docparse: *ovis_plan
+  statement: *ovis_plan
+  table: *ovis_plan
+  ocr_line: *ovis_plan
+  handwriting: *ovis_plan
+  "ocr_line@Fine-grained text recognition":
+    kind: crop_single
+    version: ovis-parse-crop-v1
+    prompt: *ovis_prompt
+    parser: ovis_markdown
+  kie: *question
+  kie_map: *question
+  classify: *question

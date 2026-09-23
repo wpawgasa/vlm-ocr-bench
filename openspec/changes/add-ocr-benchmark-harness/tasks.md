@@ -29,7 +29,11 @@
 - [x] 3.6 Implement `ocrbench probe` (5 fixed statement pages → yes/partial/no matrix + evidence ids → `probe.json`); verify with recorded responses
 - [x] 3.7 Add `.devcontainer/teleocr-vllm.Dockerfile` (`FROM ${VLLM_IMAGE}` + pinned `TeleOCR_vllm` plugin) and point the compose `teleocr` service at it; verify `scripts/serve_teleocr.sh up` becomes healthy and a request with `no_repeat_ngram_size` is accepted
 - [ ] 3.8 Smoke-test live on the V100 box (`COMPOSE_EXTRA=.devcontainer/compose.v100.yaml scripts/serve_dotsocr.sh up`) with `pytest -m live` on 5 pages; verify predictions include logprobs and latency — PARTIAL (2026-09-22): TeleOCR verified end to end (two-stage n_requests up to 14, OTSL tables, logprobs, page latency, partial-block and error rows); dots.ocr could not be served stably on sm_70 (vLLM 0.11 FlexAttention crash), so its live path is verified in 3.9 on the H100
-- [ ] 3.9 Run full `infer` for teleocr and dotsocr on the H100; verify zero silent drops (row counts match) and error rate < 2%, and run `probe`
+- [ ] 3.9 Run full `infer` on the H100 for the run's models (dotsocr, typhoon_ocr15, ovisocr2 after 3.12, paddleocr_vl); verify zero silent drops (row counts match) and error rate < 2% per model, and run `probe` — PROGRESS (2026-09-23): dotsocr 6,846/6,846, 0 errors (v0.11.0 bf16); teleocr stopped at 852 rows, screened out (no Thai, design D16); typhoon_ocr15 in progress (v0.11.0); ovisocr2 and paddleocr_vl pending v0.22.1
+- [x] 3.10 Add OvisOCR2 and PaddleOCR-VL-1.6: `pipeline`/`crop_pipeline` plan kinds with `PipelineEndpoint` config and `models/pipeline_client.py` (retry once, never raises, no logprobs), configurable `smart_resize` factor/min pixels, `ovis_markdown` (incl. the card's `clean_truncated_repeats`) and `paddle_layout` parsers, `configs/models/{ovisocr2,paddleocr_vl}.yaml` from the official cards; verify unit tests for configs, parsers, the pipeline plan (page, crop, error, question bypass, health) and the client (options, 5xx retry, no retry on 4xx/pipeline errors)
+- [ ] 3.11 Serve OvisOCR2 and PaddleOCR-VL-1.6 on the H100: compose services on `VLLM_IMAGE_NEW` (v0.22.1), `.devcontainer/paddle-pipeline.Dockerfile` (PaddleX serving app, layout on CPU, VL via `vllm-server`), `scripts/serve_{ovisocr2,paddleocr_vl}.sh`; verify both become healthy and one statement page returns blocks through each
+- [ ] 3.12 OvisOCR2 Thai smoke gate: the Thai header crop from `evidence/` plus 5 statement and 5 ThaiOCRBench pages; verify Thai text is produced before starting its full run (otherwise screen it out like TeleOCR, with evidence)
+- [x] 3.13 Record each selected endpoint's vLLM version (`/version`, or "unknown") in `config.infer.yaml`; verify with the fake server that versions are written per model
 
 ## 4. M3 Normalization and scoring
 
@@ -66,7 +70,7 @@
 - [ ] 7.1 Implement `latency/bench.py`: seeded 200-page mix, streaming requests with TTFT, 30 s warm-up excluded, concurrency sweep, `latency.jsonl` rows, vLLM `/version` capture; verify against the fake streaming server (200 rows per point, ttft ≤ latency)
 - [ ] 7.2 Implement the `nvidia-smi` 1 s memory sampler with "unavailable" fallback; verify a test with the command absent
 - [ ] 7.3 Implement summaries (p50/p95/p99, pages/hour, GPU-hours/1,000 pages, peak memory) and multi-page document timing for 10 files; wire `ocrbench bench-latency`; verify on fixture latency rows with hand-computed percentiles
-- [ ] 7.4 Run `bench-latency` on H100 and L4 (bf16, same vLLM version); verify both GPUs have a full sweep in `latency.jsonl`
+- [ ] 7.4 Run `bench-latency` on H100 and L4 (bf16, same vLLM version per model on both GPUs; models on v0.11.0 vs v0.22.1 annotated, design D16); verify both GPUs have a full sweep in `latency.jsonl`
 
 ## 8. M6 Report
 

@@ -209,15 +209,33 @@ def _connect(cfgs: dict[str, ModelConfig]) -> dict[str, OcrModel]:
     return built
 
 
-def _write_infer_config(rp: RunPaths, cfgs: dict[str, ModelConfig], concurrency: int) -> None:
-    """Record the model settings used; a later run for other models adds to the file."""
+async def _server_versions(built: dict[str, OcrModel]) -> dict[str, str]:
+    """Each model's vLLM version, for `config.infer.yaml` ("unknown" if not reported)."""
+    versions: dict[str, str] = {}
+    for name, model in built.items():
+        getter = getattr(model, "server_version", None)
+        versions[name] = await getter() if getter is not None else "unknown"
+    return versions
+
+
+def _write_infer_config(
+    rp: RunPaths,
+    cfgs: dict[str, ModelConfig],
+    concurrency: int,
+    versions: dict[str, str] | None = None,
+) -> None:
+    """Record the model settings and server versions used; a later run for other models
+    adds to the file."""
     snapshot: dict = {}
     if rp.config_infer.exists():
         snapshot = yaml.safe_load(rp.config_infer.read_text(encoding="utf-8")) or {}
     snapshot["concurrency"] = concurrency
     snapshot.setdefault("models", {})
     for name, cfg in cfgs.items():
-        snapshot["models"][name] = cfg.model_dump(mode="json")
+        snapshot["models"][name] = {
+            **cfg.model_dump(mode="json"),
+            "vllm_version": (versions or {}).get(name, "unknown"),
+        }
     rp.config_infer.write_text(
         yaml.safe_dump(snapshot, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
@@ -254,7 +272,7 @@ def infer(
     resolved, cfgs = _load_models(config, models)
     n_concurrent = concurrency or resolved.run.concurrency
     built = _connect(cfgs)
-    _write_infer_config(rp, cfgs, n_concurrent)
+    _write_infer_config(rp, cfgs, n_concurrent, asyncio.run(_server_versions(built)))
 
     rows = list(read_rows(rp.manifest, ManifestRow))
     # Models run one after another: they may share a GPU, and page latency_ms should

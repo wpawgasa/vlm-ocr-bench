@@ -6,10 +6,12 @@ from typing import Any
 from ocr_bench.config import ModelConfig
 from ocr_bench.models.base import ChatClient, PlannedModel
 from ocr_bench.models.dotsocr import DotsOCRModel
+from ocr_bench.models.pipeline_client import PipelineClient
 from ocr_bench.models.teleocr import TeleOCRModel
 from ocr_bench.models.typhoon import TyphoonModel
 from ocr_bench.models.vllm_client import EndpointUnavailable, VllmClient
 
+# Models without an entry (ovisocr2, paddleocr_vl) run as plain `PlannedModel`s.
 ADAPTERS: dict[str, type[PlannedModel]] = {
     "teleocr": TeleOCRModel,
     "dotsocr": DotsOCRModel,
@@ -23,9 +25,12 @@ def build_model(
     client: ChatClient | None = None,
     openai_client: Any | None = None,
     base_url: str | None = None,
+    pipeline: PipelineClient | None = None,
 ) -> PlannedModel:
     """Adapter for `cfg`. Without an explicit `client`, a `VllmClient` is built on
-    `base_url` or `$<endpoint_env>`; an unset variable raises `EndpointUnavailable`."""
+    `base_url` or `$<endpoint_env>`; likewise a `PipelineClient` on
+    `$<pipeline.endpoint_env>` when the config has a pipeline. An unset variable raises
+    `EndpointUnavailable`."""
     if client is None:
         url = base_url or os.environ.get(cfg.endpoint_env)
         if not url:
@@ -38,4 +43,11 @@ def build_model(
             client=openai_client,
             model_label=cfg.name,
         )
-    return ADAPTERS.get(cfg.name, PlannedModel)(cfg, client)
+    if pipeline is None and cfg.pipeline is not None:
+        url = os.environ.get(cfg.pipeline.endpoint_env)
+        if not url:
+            raise EndpointUnavailable(
+                cfg.name, f"${cfg.pipeline.endpoint_env}", "variable is not set"
+            )
+        pipeline = PipelineClient(url, cfg.pipeline, model_label=cfg.name)
+    return ADAPTERS.get(cfg.name, PlannedModel)(cfg, client, pipeline)

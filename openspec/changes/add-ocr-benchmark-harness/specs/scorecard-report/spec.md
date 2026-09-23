@@ -19,7 +19,11 @@ Assembles all run outputs into a client-facing scorecard that answers each clien
 - **THEN** all four artifact kinds exist, and every table in the markdown has a matching xlsx sheet
 
 ### Requirement: Question-mapped scorecard
-The scorecard SHALL contain one row per client question line: Q1 Thai text (CER by condition), Q1 handwriting, Q1 tables, Q1 bank statements, Q2 field accuracy (with a critical-only row), Q2 FA/FR, Q3 confidence, Q4 output, Q5 duplicates, Q5 reconciliation and Q8 throughput. Each row SHALL have the columns Metric, TeleOCR, dots.ocr, n, Data and Note. A row whose inputs are missing SHALL be marked "not benchmarked", with the reason, and SHALL NOT be omitted.
+The scorecard SHALL contain one row per client question line: Q1 Thai text (CER by condition), Q1 handwriting, Q1 tables, Q1 bank statements, Q2 field accuracy (with a critical-only row), Q2 FA/FR, Q3 confidence, Q4 output, Q5 duplicates, Q5 reconciliation and Q8 throughput. Each row SHALL have the columns Metric, one column per model in `configs/run.yaml` (dots.ocr, typhoon-ocr1.5, OvisOCR2, PaddleOCR-VL-1.6), n, Data and Note. A row whose inputs are missing SHALL be marked "not benchmarked", with the reason, and SHALL NOT be omitted. A model screened out before the full run (TeleOCR: does not read Thai) SHALL NOT get a scorecard column; the report SHALL instead carry a screening note with the finding, its evidence (sample outputs, the Thai-header crop test) and the number of rows run.
+
+#### Scenario: Screened-out model
+- **WHEN** the report is rendered for a run that includes TeleOCR's partial evidence rows
+- **THEN** TeleOCR appears only in the screening note, with its row count and evidence, and not as a scorecard column
 
 #### Scenario: Missing stage
 - **WHEN** `bench-latency` was not run for the run id

@@ -50,7 +50,27 @@ class TwoStage(BaseModel):
         return self
 
 
-PlanKind = Literal["single", "crop_single", "grounding", "two_stage", "question"]
+class PipelineEndpoint(BaseModel):
+    """A vendor document-parsing pipeline served over HTTP (PaddleOCR-VL: PaddleX's official
+    `/layout-parsing` server, which runs its own layout model and calls the model's vLLM
+    server per block). The harness posts the page and reads back structured blocks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint_env: str
+    path: str = "/layout-parsing"
+    health_path: str = "/health"
+    # Extra JSON fields of every request (the pipeline's own options); the image is added.
+    request: dict[str, Any] = Field(default_factory=dict)
+    timeout_s: float = 300.0
+
+
+# `pipeline` sends the page to `ModelConfig.pipeline`; `crop_pipeline` sends the question's
+# region crop, like `crop_single`.
+PlanKind = Literal[
+    "single", "crop_single", "grounding", "two_stage", "question", "pipeline", "crop_pipeline"
+]
+PIPELINE_KINDS = ("pipeline", "crop_pipeline")
 
 
 class RequestPlan(BaseModel):
@@ -90,7 +110,10 @@ class ModelConfig(BaseModel):
     sampling: Sampling = Field(default_factory=Sampling)
     image_resize: Literal["none", "smart_resize", "max_side"] = "none"
     max_pixels: int | None = None
+    min_pixels: int | None = None  # smart_resize lower bound (default: Qwen2-VL's 3136)
+    resize_factor: int = 28  # smart_resize multiple: patch size x spatial merge
     max_side: int | None = None
+    pipeline: PipelineEndpoint | None = None
     plans: dict[str, RequestPlan]
 
     @model_validator(mode="after")
@@ -106,6 +129,8 @@ class ModelConfig(BaseModel):
             raise ValueError("image_resize 'smart_resize' requires max_pixels")
         if self.image_resize == "max_side" and self.max_side is None:
             raise ValueError("image_resize 'max_side' requires max_side")
+        if self.pipeline is None and any(p.kind in PIPELINE_KINDS for p in self.plans.values()):
+            raise ValueError(f"model '{self.name}' has pipeline plans but no `pipeline` endpoint")
         return self
 
     def plan_for(self, task: Task | str, subtask: str | None) -> RequestPlan:

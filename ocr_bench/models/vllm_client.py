@@ -142,6 +142,21 @@ class VllmClient:
                 self.model_label, self.base_url, f"GET {url} -> {response.status_code}"
             )
 
+    async def version(self) -> str:
+        """The server's vLLM version from `GET /version`, or "unknown" if unavailable."""
+        url = health_url(self.base_url)[: -len("/health")] + "/version"
+        try:
+            if self._http_client is not None:
+                response = await self._http_client.get(url, timeout=HEALTH_TIMEOUT_S)
+            else:
+                async with httpx.AsyncClient() as http:
+                    response = await http.get(url, timeout=HEALTH_TIMEOUT_S)
+            if response.status_code == 200:
+                return str(response.json().get("version") or "unknown")
+        except (httpx.HTTPError, ValueError, AttributeError):
+            pass
+        return "unknown"
+
     def messages(self, image: Image.Image, prompt: str) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         if self.system_prompt is not None:

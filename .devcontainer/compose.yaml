@@ -3,7 +3,10 @@
 #   dev      – harness container (VS Code attaches here). Always started.
 #   teleocr  – vLLM OpenAI server for StarDoc-AI/TeleOCR      (profile: serve)
 #   dotsocr  – vLLM OpenAI server for dots-studio/dots.ocr    (profile: serve)
-#   typhoon  – vLLM OpenAI server for typhoon-ocr1.5-2b       (profile: typhoon, optional 3rd reference)
+#   typhoon  – vLLM OpenAI server for typhoon-ocr1.5-2b       (profile: typhoon)
+#   ovisocr2 – vLLM OpenAI server for ATH-MaaS/OvisOCR2        (profile: ovis, VLLM_IMAGE_NEW)
+#   paddleocr_vl + paddle_pipeline – PaddleOCR-VL-1.6 vLLM server + PaddleX pipeline server
+#                                                              (profile: paddle, VLLM_IMAGE_NEW)
 #
 # Start the model servers (from the host or from inside the dev container):
 #   docker compose -f .devcontainer/compose.yaml --profile serve up -d
@@ -51,6 +54,9 @@ services:
       TELEOCR_BASE_URL: http://teleocr:8000/v1
       DOTSOCR_BASE_URL: http://dotsocr:8000/v1
       TYPHOON_BASE_URL: http://typhoon:8000/v1
+      OVISOCR2_BASE_URL: http://ovisocr2:8000/v1
+      PADDLEOCR_VL_BASE_URL: http://paddleocr_vl:8000/v1
+      PADDLE_PIPELINE_URL: http://paddle_pipeline:8080
     volumes:
       - ..:/workspaces/vlm-ocr-bench:cached
       # Host data dir: ThaiOCRBench exports, bank statements, runs/. Default is ./data in the repo
@@ -122,6 +128,69 @@ services:
       - '--seed=0'
       - '--max-logprobs=5'
 
+  # OvisOCR2 and PaddleOCR-VL-1.6 need a newer vLLM than the pinned 0.11.0 (Qwen3.5 GDN layers:
+  # >= 0.18; PaddleOCR-VL: >= 0.11.1), so they run on VLLM_IMAGE_NEW. Compare their latency only
+  # with models measured on the same image (openspec model-inference: mixed vLLM versions).
+  ovisocr2:
+    <<: *vllm
+    image: ${VLLM_IMAGE_NEW:-vllm/vllm-openai:v0.22.1}
+    profiles: ["ovis"]
+    ports: ["${OVISOCR2_PORT:-8004}:8000"]
+    environment:
+      <<: *vllm-env
+      NVIDIA_VISIBLE_DEVICES: ${OVISOCR2_GPU:-0}
+    command:
+      - '--model=ATH-MaaS/OvisOCR2'
+      - '--served-model-name=ovisocr2'
+      - '--gdn-prefill-backend=triton'  # as the model card's LLM(...) example
+      - '--dtype=${VLLM_DTYPE:-bfloat16}'
+      - '--max-model-len=32768'         # <= ~8.1k image tokens at 2880^2 + 16384 output
+      - '--limit-mm-per-prompt={"image": 1}'
+      - '--gpu-memory-utilization=0.9'
+      - '--seed=0'
+      - '--max-logprobs=5'
+
+  paddleocr_vl:
+    <<: *vllm
+    image: ${VLLM_IMAGE_NEW:-vllm/vllm-openai:v0.22.1}
+    profiles: ["paddle"]
+    ports: ["${PADDLEOCR_VL_PORT:-8005}:8000"]
+    environment:
+      <<: *vllm-env
+      NVIDIA_VISIBLE_DEVICES: ${PADDLEOCR_VL_GPU:-0}
+    command:
+      # vLLM recipe for PaddleOCR-VL; the served name is what the PaddleX pipeline requests.
+      - '--model=PaddlePaddle/PaddleOCR-VL-1.6'
+      - '--served-model-name=PaddleOCR-VL-1.6-0.9B'
+      - '--trust-remote-code'
+      - '--dtype=${VLLM_DTYPE:-bfloat16}'
+      - '--max-model-len=16384'
+      - '--max-num-batched-tokens=16384'
+      - '--no-enable-prefix-caching'
+      - '--mm-processor-cache-gb=0'
+      - '--limit-mm-per-prompt={"image": 1}'
+      - '--gpu-memory-utilization=0.9'
+      - '--seed=0'
+      - '--max-logprobs=5'
+
+  paddle_pipeline:
+    # PaddleX's official PaddleOCR-VL-1.6 pipeline server (layout on CPU) -> paddleocr_vl.
+    image: ocr-bench/paddle-pipeline:paddleocr3.7.0
+    build:
+      context: .
+      dockerfile: paddle-pipeline.Dockerfile
+    profiles: ["paddle"]
+    restart: "no"
+    ports: ["${PADDLE_PIPELINE_PORT:-8006}:8080"]
+    environment:
+      VL_SERVER_URL: http://paddleocr_vl:8000/v1
+    volumes:
+      - paddlex-models:/root/.paddlex
+    depends_on:
+      paddleocr_vl:
+        condition: service_healthy
+
 volumes:
   uv-cache:
   venv:
+  paddlex-models:

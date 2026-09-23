@@ -63,7 +63,7 @@ def test_parse_region_takes_last_bracket():
 # --- request plans --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["teleocr", "dotsocr", "typhoon_ocr15"])
+@pytest.mark.parametrize("name", ["teleocr", "dotsocr", "typhoon_ocr15", "ovisocr2"])
 @pytest.mark.parametrize("task", [Task.kie, Task.kie_map, Task.classify])
 def test_fallback_sends_benchmark_question_verbatim(name, task):
     question = "จากรูปภาพกรุณาดึงข้อมูล ชื่อร้าน เป็นรูปแบบ JSON"

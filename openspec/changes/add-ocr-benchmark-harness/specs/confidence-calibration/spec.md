@@ -20,7 +20,7 @@ For each extracted field, the system SHALL compute these features:
 ### Requirement: Fitted confidence proxy
 The system SHALL fit `conf(f) = σ(w0 + w1·mean_logprob + w2·min_logprob + w3·agree + w4·arith)` by logistic regression on `field_exact`. The training data is labeled fields: ThaiOCRBench KIE, digital statement pages and the manual set. Cross-validation SHALL be 5-fold, grouped by `sample_id`, so fields of one sample never span train and test.
 
-A `logprob_only` variant SHALL be fitted alongside, for single-model production. Null features SHALL be handled by explicit indicator encoding, not by dropping fields.
+A `logprob_only` variant SHALL be fitted alongside, for single-model production. Null features SHALL be handled by explicit indicator encoding, not by dropping fields. A model whose endpoint returns no token logprobs (PaddleOCR-VL through its pipeline server) SHALL keep its logprob features null with the indicator set; its `full` variant is fitted on the remaining features and its `logprob_only` variant SHALL be recorded as "not available — no logprobs", not fitted.
 
 #### Scenario: Grouped folds
 - **WHEN** calibration is fitted
@@ -28,7 +28,11 @@ A `logprob_only` variant SHALL be fitted alongside, for single-model production.
 
 #### Scenario: Two variants
 - **WHEN** `calibrate` completes
-- **THEN** out-of-fold confidences exist for both the `full` and `logprob_only` variants, per model
+- **THEN** out-of-fold confidences exist for both the `full` and `logprob_only` variants, per model that returns logprobs
+
+#### Scenario: Model without logprobs
+- **WHEN** `calibrate` runs on PaddleOCR-VL predictions, which carry no token logprobs
+- **THEN** its `logprob_only` variant is reported as "not available — no logprobs" and its `full` variant uses only the agreement and arithmetic features
 
 ### Requirement: Calibration bands and ECE
 The system SHALL write `calibration.jsonl` and a report table with five bands: ≥0.98, 0.90–0.98, 0.75–0.90, 0.50–0.75 and <0.50. Each band SHALL show field count, accuracy and a 95% CI. The system SHALL also report ECE over 10 equal-width bins, a reliability plot, and the same band table restricted to critical fields.

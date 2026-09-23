@@ -224,6 +224,28 @@ def test_health_connection_error_raises_endpoint_unavailable():
         asyncio.run(client.health())
 
 
+def test_version_reads_server_version():
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        return httpx.Response(200, json={"version": "0.22.1"})
+
+    client = VllmClient(
+        "http://t:8000/v1", "ovisocr2", client=FakeOpenAI([]), http_client=_http(handler)
+    )
+    assert asyncio.run(client.version()) == "0.22.1"
+    assert seen == ["http://t:8000/version"]
+
+
+def test_version_unknown_on_error_or_bad_body():
+    for handler in (lambda r: httpx.Response(404), lambda r: httpx.Response(200, text="x")):
+        client = VllmClient(
+            "http://t:8000/v1", "dotsocr", client=FakeOpenAI([]), http_client=_http(handler)
+        )
+        assert asyncio.run(client.version()) == "unknown"
+
+
 def test_streaming_records_ttft_and_text():
     from openai.types.chat import ChatCompletionChunk
 

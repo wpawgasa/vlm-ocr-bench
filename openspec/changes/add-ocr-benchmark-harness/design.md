@@ -5,10 +5,10 @@
 The repo currently has:
 
 - A dev container: Python 3.11, `uv`, poppler, Thai fonts and opencv runtime libraries, with no CUDA.
-- A compose stack that serves TeleOCR, dots.ocr and, optionally, typhoon-ocr1.5-2b with vLLM `v0.11.0`. The flags are those from spec §4.3, plus `--max-logprobs=5`.
-- `scripts/serve_{teleocr,dotsocr}.sh`.
+- A compose stack that serves TeleOCR, dots.ocr and typhoon-ocr1.5-2b with vLLM `v0.11.0`, and OvisOCR2 and PaddleOCR-VL-1.6 (plus PaddleX's pipeline server) with vLLM `v0.22.1` (D16). The flags are those from spec §4.3, plus `--max-logprobs=5`.
+- `scripts/serve_{teleocr,dotsocr,ovisocr2,paddleocr_vl}.sh`.
 
-The harness container sees `$TELEOCR_BASE_URL`, `$DOTSOCR_BASE_URL`, `$TYPHOON_BASE_URL` and `$OCRBENCH_DATA_DIR=/data`, and has `nvidia-smi` for utility access only.
+The harness container sees `$TELEOCR_BASE_URL`, `$DOTSOCR_BASE_URL`, `$TYPHOON_BASE_URL`, `$OVISOCR2_BASE_URL`, `$PADDLEOCR_VL_BASE_URL`, `$PADDLE_PIPELINE_URL` and `$OCRBENCH_DATA_DIR=/data`, and has `nvidia-smi` for utility access only.
 
 Code is written on a V100 dev box, where numbers are smoke-test only. Accuracy and latency runs happen on an H100, with an L4 session for latency.
 
@@ -23,7 +23,7 @@ There is no Python code yet. See proposal.md for motivation. The source-of-truth
 - Tests run on CPU without model servers, by using recorded fixture responses.
 
 **Non-Goals:**
-- A general OCR benchmarking framework. Only the 9 tasks and 2–3 models in scope are supported.
+- A general OCR benchmarking framework. Only the 9 tasks and the models in `configs/run.yaml` (four after the H100 screening, D16) are supported.
 - Async job orchestration, databases or dashboards. JSONL files plus a CLI are enough.
 - Loading model weights in the harness, or any quantization.
 
@@ -72,6 +72,8 @@ Adapters (`teleocr.py`, `dotsocr.py`, `typhoon.py`) implement `OcrModel`. Each m
   - Use a type-specific prompt and sampling.
   - Skip `image`, `list` and `equation_block` blocks.
 - `question`: send the sample's benchmark question (the fallback).
+- `pipeline`: post the whole page to the model's vendor pipeline server (D15) and parse the structured result it returns.
+- `crop_pipeline`: crop the fine-grained region, then `pipeline`.
 
 The plan's version tag is `prompt_version`. The policy table lives in the model-inference spec.
 *Alternative:* raw `httpx`. Rejected: the SDK handles the multimodal message shape and logprob parsing, and the code stays small.
@@ -85,6 +87,8 @@ The plan's version tag is `prompt_version`. The policy table lives in the model-
 - `teleocr_layout`: lines of `<box:x1 y1 … ><label:type><angle tag>` with 0–1000 coordinates, possibly polygons, mapped to blocks. Block texts come from the block calls.
 - `otsl_to_html`: TeleOCR tables, with spans, ported from TeleOCR's reference `convert_otsl_to_html`.
 - `typhoon_markdown`: markdown with embedded `<table>` HTML, `<figure>` and `<page_number>` tags.
+- `ovis_markdown`: markdown with `<table>` HTML; figure paragraphs `<img src="images/bbox_l_t_r_b.jpg" />` (0–1000 units) become figure blocks and are dropped from the text, then OvisOCR2's official `clean_truncated_repeats` cuts a looping tail, as the model card's parser does.
+- `paddle_layout`: the JSON page of PaddleX's `/layout-parsing` response; `prunedResult.parsing_res_list` blocks (`block_label`, `block_content`, `block_bbox`) become blocks, table content is already HTML. Page text joins every non-figure block, headers and footers included (the pipeline's own markdown drops them, and statements keep account details in headers).
 
 Each model config names a parser per request type. Parsing failures produce a `NormalizedPage` with `parse_error` and never raise, as the output-normalization spec requires. The statement mapper (M4) consumes only `NormalizedPage.tables` and `.blocks`, so it is model-independent.
 
@@ -154,14 +158,31 @@ The harness uses the same client in streaming mode.
 TeleOCR's official vLLM path registers a modified `Qwen2_5_VLForConditionalGeneration` via the `TeleOCR_vllm` plugin (from github.com/caipeng328/TeleOCR), and its sampling uses `no_repeat_ngram_size`. The compose `teleocr` service therefore builds a small derived image, `.devcontainer/teleocr-vllm.Dockerfile` (`FROM ${VLLM_IMAGE}`), which pip-installs the plugin at a pinned commit, instead of using the stock image. dots.ocr and typhoon keep the stock vLLM image.
 *Alternative:* the stock image with the upstream Qwen2.5-VL class. Rejected: it silently ignores `no_repeat_ngram_size` and TeleOCR's architecture changes, which would understate the model.
 
+### D15. PaddleOCR-VL-1.6 as its official pipeline server
+PaddleOCR-VL is officially two-stage: PP-DocLayoutV3 finds blocks, labels and reading order, then the 0.9B VLM reads each crop with a label-specific prompt (`OCR:`, `Table Recognition:` → OTSL → HTML, `Formula Recognition:`). The block post-processing (layout NMS, per-label merge modes, block merging) is about 3k lines of PaddleX code. Rather than port it, the compose `paddle_pipeline` service runs PaddleX's own serving app (`paddlex --serve`, `POST /layout-parsing`) on the pipeline config shipped with the installed PaddleX (`PaddleOCR-VL-1.6`), changing only `VLRecognition.genai_config` to the documented `vllm-server` backend pointed at the `paddleocr_vl` vLLM service (served as `PaddleOCR-VL-1.6-0.9B`, the name the pipeline requests). Layout runs on CPU (`paddlepaddle` CPU wheel), keeping the GPU for vLLM and the image small (`.devcontainer/paddle-pipeline.Dockerfile`, paddleocr 3.7.0). `models/pipeline_client.py` posts the page as base64 PNG, retries once on timeout/5xx like the vLLM client, and never raises. `kie`/`classify` bypass the pipeline and send the benchmark question straight to the vLLM endpoint.
+*Trade-off:* the pipeline returns no tokens or logprobs, so PaddleOCR-VL has no logprob confidence (confidence-calibration spec) and its TTFT is null; its page latency includes the CPU layout stage.
+*Alternative:* serve PP-DocLayoutV3 alone and port the crop/merge/assemble logic into the harness. Rejected: about a day of work, and scores could drift from the real product; it would keep logprobs, which a logging proxy between pipeline and vLLM could still add later.
+
+### D16. Model line-up after the H100 screening, and mixed vLLM versions
+The first H100 run showed TeleOCR does not read Thai (0% Thai characters on statement pages in bf16 with official sampling; a clean Thai header crop is dropped with presence penalty 1.0 and 0.0 alike, so it is the model, not the harness). It was stopped at 852 rows, kept as evidence, and removed from `run.yaml`. typhoon-ocr1.5-2b (Thai-specific) became a main model, and two Thai-capable parsers were added: OvisOCR2 (0.85B, Qwen3.5 base, end-to-end, one official prompt; no stated Thai support, so a Thai smoke test gates its full run) and PaddleOCR-VL-1.6 (0.9B, 109 languages incl. Thai, D15).
+Both new models need a newer vLLM than the pinned v0.11.0 (Qwen3.5's GDN layers and `--gdn-prefill-backend`: ≥ 0.18; PaddleOCR-VL: ≥ 0.11.1). They run on `VLLM_IMAGE_NEW` (v0.22.1); dots.ocr and typhoon stay on v0.11.0 so the finished dots.ocr run is not redone. Accuracy is compared across images; latency only with the version annotated (latency-benchmark spec). OvisOCR2's card passes min/max pixels as vLLM `mm_processor_kwargs`; the harness instead pre-resizes to the same bounds at factor 32, which avoids depending on that API shape and which the server's processor keeps unchanged.
+**Sensitivity variants** are separate model configs (e.g. `dotsocr_t01`: dots.ocr at upstream's T=0.1) run in their own run id on a subset (rows where greedy dots.ocr hit `max_tokens`). They explain a behaviour (dots.ocr's Thai repetition loops persist on 392 of 680 capped rows at T=0.1) and are never reported beside headline scores.
+
+### D17. Results are DVC-tracked per file
+The DVC `prepare` stage owns only `img`, `gt`, `manifest.jsonl`, `config.resolved.yaml` and `prepare_summary.json`, so each run's results (`predictions.jsonl`, `config.infer.yaml`, infer logs, `evidence/`) are `dvc add`-ed per file, with `.gitignore` letting `data/runs/*/*.dvc` through. With the hardlink cache these files are read-only: `dvc unprotect` them before resuming `infer`, then `dvc add`, `dvc push` and commit the pointers.
+
 ## Risks / Trade-offs
 
 - **Task names, domain field or license in ThaiOCRBench differ from expectations** → The loader asserts task names and prints what is present, and the domain slice is optional. Confirm the license before quoting.
 - **Official-score port drifts (e.g. PyThaiNLP/NLTK version differences)** → A mandatory per-task parity gate applies. On failure, the report marks BMFL "not comparable" and CER/WER still stand.
-- **TeleOCR emits no bbox or no JSON** → The probe records `no`. dots.ocr carries Q4, and TeleOCR shows text-only rows. The scorecard never errors on a missing capability.
+- **A model emits no bbox or no JSON** → The probe records `no`. The scorecard never errors on a missing capability.
 - **Logprob span matching fails often (for example, the model reformats numbers)** → The digit-only fallback is used, and `span_found` rate is reported. The `agree` and `arith` features still carry signal.
 - **Some handwriting questions are QA ("what does item 3 say?")** → Native OCR returns the whole text, so these samples score poorly by construction. The report shows handwriting separately, with this caveat.
-- **TeleOCR is trained for Chinese and English only** → Its Thai quality is exactly what the benchmark measures. The probe and the Q1 matrix state it plainly.
+- **TeleOCR is trained for Chinese and English only** → Realized on the H100: it does not read Thai, and it was screened out (D16). The report's screening note states it with evidence.
+- **OvisOCR2 has no stated Thai support** → A Thai smoke test (header crop plus a few statement and ThaiOCRBench pages) gates its full run; a failure is reported like TeleOCR's.
+- **PaddleOCR-VL returns no logprobs through its pipeline** → Its confidence uses agreement and arithmetic features only, and the report says so (D15).
+- **Mixed vLLM versions across models** → Versions are recorded per endpoint, accuracy is compared, latency is annotated (D16).
+- **Shared GPU host with a tight root disk** → The containerd image store keeps each vLLM image twice (~35–38 GB); a full disk crashed another team's MongoDB once. Check headroom before pulls, archive unused images to GCS, and guard long runs with a free-space check.
 - **Native prompts make KIE/classification mostly unsupported** → The fallback question is still sent and scored. The probe records `no` for JSON extraction, which answers Q4 honestly.
 - **Too few digital statement pages (< 40)** → `prepare` warns, and the manual set becomes the primary statement label source.
 - **Calibration is fitted on benchmark data, not บสย. documents** → The report states that thresholds must be re-fitted on client documents. `thresholds.json` makes the procedure repeatable.
@@ -184,5 +205,5 @@ Rollback is deleting `runs/<run_id>/`.
 
 - Which GPU hourly rate the cost line uses. This is a config input and does not affect code.
 - Who labels the manual anchor set (about 4 hours for 50 pages). This does not affect code.
-- Whether typhoon-ocr1.5-2b runs as a third reference. The adapter is built either way, and it is enabled in `run.yaml`.
+- ~~Whether typhoon-ocr1.5-2b runs as a third reference.~~ Resolved: it is a main model (D16).
 - The size and bank mix of the statement corpus. This affects only the warnings and the strength of the conclusions.

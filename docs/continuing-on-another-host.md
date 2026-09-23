@@ -13,8 +13,22 @@ OCR 1.5 is now a main model, and OvisOCR2 plus PaddleOCR-VL-1.6 are being added.
 | --- | --- | --- |
 | dots.ocr | 6,846 / 6,846, 0 errors | done (vLLM 0.11.0, bf16) |
 | TeleOCR | 852 / 6,846 | stopped on purpose; kept as evidence |
-| typhoon_ocr15 | 342 / 6,846 | interrupted by a full disk; resume with `infer` |
-| OvisOCR2, PaddleOCR-VL-1.6 | — | not integrated yet; need vLLM ≥ 0.18 / ≥ 0.11.1 (plan: v0.22.1) |
+| typhoon_ocr15 | in progress | resumed after a full-disk crash (v0.11.0) |
+| OvisOCR2, PaddleOCR-VL-1.6 | — | integrated and unit-tested (tasks 3.10, 3.13); serve on v0.22.1 (3.11), OvisOCR2 Thai gate first (3.12) |
+
+Serving the new models (single GPU: stop the current server first):
+
+```bash
+scripts/serve_ovisocr2.sh up        # vllm/vllm-openai:v0.22.1 (VLLM_IMAGE_NEW), --gdn-prefill-backend=triton
+scripts/serve_paddleocr_vl.sh up    # PaddleOCR-VL vLLM + PaddleX pipeline server (layout on CPU)
+# the dev container needs OVISOCR2_BASE_URL / PADDLEOCR_VL_BASE_URL / PADDLE_PIPELINE_URL
+# (in compose.yaml; recreate it, or pass them with `docker exec -e`)
+uv run ocrbench infer --run-id 2026-09-22-a --models paddleocr_vl
+```
+
+`configs/run.yaml` still lists teleocr/dotsocr: it is a `prepare` dependency, so changing it
+needs `config.resolved.yaml` regenerated and `dvc commit -f prepare`, which fails while
+`data/statements` is missing from the remote. Pass `--models` explicitly until then.
 
 Findings so far (details and the evidence crop: `data/runs/2026-09-22-a/evidence/`, DVC-tracked):
 - **TeleOCR does not read Thai** in bf16 with its official sampling: 0% Thai characters on
@@ -27,9 +41,12 @@ Findings so far (details and the evidence crop: `data/runs/2026-09-22-a/evidence
   680, so the loops are mostly the model, not greedy decoding.
 
 **Results are DVC-tracked per file** (`data/runs/<run>/*.dvc`; `prepare` owns only img, gt,
-manifest and the two config files). With the hardlink cache these files are read-only, so run
-`dvc unprotect data/runs/2026-09-22-a/predictions.jsonl` **before** resuming `infer`, then
-`dvc add` + `dvc push` + commit the `.dvc` files after it. The sensitivity run's `img`, `gt`,
+manifest and the two config files). With the hardlink cache these files are read-only, and
+`infer` rewrites `config.infer.yaml` and appends to `predictions.jsonl` (plus a shell `>` to its
+log), so **before** resuming `infer` run
+`dvc unprotect data/runs/2026-09-22-a/{predictions.jsonl,config.infer.yaml,infer-<model>.log}`
+(it fails with `Permission denied` otherwise), then `dvc add` + `dvc push` + commit the `.dvc`
+files after it. `unprotect` makes a private copy, so predictions briefly cost ~1 GB more disk. The sensitivity run's `img`, `gt`,
 `config.resolved.yaml` and `prepare_summary.json` are relative symlinks into `2026-09-22-a`
 (not tracked); recreate them after a pull.
 

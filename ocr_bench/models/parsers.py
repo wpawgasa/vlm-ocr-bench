@@ -467,6 +467,114 @@ def _typhoon_markdown(raw: str, ctx: ParseContext) -> NormalizedPage:
     return _tables_page(text, extra)
 
 
+# --- OvisOCR2 markdown ----------------------------------------------------------------------
+
+_OVIS_IMG_RE = re.compile(r'<img src="images/bbox_(\d+)_(\d+)_(\d+)_(\d+)\.jpg" />')
+
+
+def clean_truncated_repeats(
+    text: str,
+    min_text_len: int = 8000,
+    max_period: int = 200,
+    min_period: int = 1,
+    min_repeat_chars: int = 100,
+    min_repeat_times: int = 5,
+) -> str:
+    """OvisOCR2's official post-processing (model card `OvisOCR2Parser`, Apache-2.0): cut a
+    degenerate repeated tail of a long output down to one period."""
+    n = len(text)
+    if n < min_text_len:
+        return text
+    max_period = min(max_period, n - 1)
+    for unit_len in range(min_period, max_period + 1):
+        if text[n - 1] != text[n - 1 - unit_len]:
+            continue
+        match_len = 1
+        idx = n - 2
+        while idx >= unit_len and text[idx] == text[idx - unit_len]:
+            match_len += 1
+            idx -= 1
+        total_len = match_len + unit_len
+        repeat_times = total_len // unit_len
+        tail_len = total_len % unit_len
+        if repeat_times >= min_repeat_times and total_len >= min_repeat_chars:
+            return text[: n - total_len + unit_len] + text[n - tail_len :]
+    return text
+
+
+def _ovis_markdown(raw: str, ctx: ParseContext) -> NormalizedPage:
+    """Markdown with HTML tables; figures are `<img src="images/bbox_l_t_r_b.jpg" />` in 0-1000
+    units of the sent image. As the official parser: drop the image-tag paragraphs, then cut
+    a repeated tail. The tags become figure blocks (bboxes in original-image pixels)."""
+    width, height = ctx.orig_size or (1000, 1000)
+    figures = [
+        Block(
+            type=BlockType.figure,
+            bbox=(
+                int(m.group(1)) * width / 1000,
+                int(m.group(2)) * height / 1000,
+                int(m.group(3)) * width / 1000,
+                int(m.group(4)) * height / 1000,
+            ),
+        )
+        for m in _OVIS_IMG_RE.finditer(raw)
+    ]
+    text = "\n\n".join(
+        block
+        for block in raw.strip().split("\n\n")
+        if not block.strip().startswith('<img src="images/bbox_')
+    )
+    return _tables_page(clean_truncated_repeats(text), figures)
+
+
+# --- PaddleOCR-VL pipeline ------------------------------------------------------------------
+
+# PP-DocLayoutV3 labels (PaddleX pipeline config PaddleOCR-VL-1.6.yaml); unlisted -> text.
+_PADDLE_BLOCK_TYPE = {
+    "table": BlockType.table,
+    "image": BlockType.figure,
+    "chart": BlockType.figure,
+    "seal": BlockType.figure,
+    "header_image": BlockType.figure,
+    "footer_image": BlockType.figure,
+    "header": BlockType.header,
+    "footer": BlockType.footer,
+    "footnote": BlockType.footer,
+    "number": BlockType.footer,
+}
+
+
+def _paddle_layout(raw: str, ctx: ParseContext) -> NormalizedPage:
+    """JSON of one `/layout-parsing` page (`PipelineClient`): `prunedResult.parsing_res_list`
+    blocks `{block_label, block_content, block_bbox, block_order}` in pixels of the image
+    sent. Table content is HTML (the pipeline converts OTSL). Page text joins every
+    non-figure block in list order, headers and footers included, like the other layout
+    parsers (the pipeline's own markdown drops them, and statements keep account details in
+    headers); the pipeline markdown stays in the raw output."""
+    data = json.loads(raw)
+    items = (data.get("prunedResult") or {}).get("parsing_res_list")
+    if not isinstance(items, list):
+        markdown = ((data.get("markdown") or {}).get("text") or "").strip()
+        return NormalizedPage(text=markdown, parse_error="no parsing_res_list in pipeline result")
+    blocks: list[Block] = []
+    tables: list[list[list[str]]] = []
+    texts: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        block_type = _PADDLE_BLOCK_TYPE.get(str(item.get("block_label", "")), BlockType.text)
+        text = item.get("block_content")
+        text = text.strip() if isinstance(text, str) else ""
+        blocks.append(
+            Block(type=block_type, text=text, bbox=_scaled_bbox(item.get("block_bbox"), ctx))
+        )
+        if block_type == BlockType.table:
+            tables.extend(rows for _, rows in html_tables(text))
+        if block_type != BlockType.figure and text:
+            texts.append(text)
+    return NormalizedPage(text="\n\n".join(texts), blocks=blocks, tables=tables)
+
+
 # --- registry -------------------------------------------------------------------------------
 
 PARSERS: dict[str, Parser] = {
@@ -477,6 +585,8 @@ PARSERS: dict[str, Parser] = {
     "teleocr_layout": _teleocr_layout,
     "otsl": _otsl,
     "typhoon_markdown": _typhoon_markdown,
+    "ovis_markdown": _ovis_markdown,
+    "paddle_layout": _paddle_layout,
 }
 
 
