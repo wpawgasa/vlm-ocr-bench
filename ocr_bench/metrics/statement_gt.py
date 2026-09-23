@@ -14,6 +14,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+import numpy as np
+
 from ocr_bench.config import BankOverrides
 from ocr_bench.metrics.kie_f1 import FieldScore, score_fields, worst_case_fields
 from ocr_bench.normalize.fields import normalize_field
@@ -328,6 +330,36 @@ class ParsedTextLayer:
     has_header: bool
 
 
+def unwarp_words(words: list[Word], homography: list[list[float]] | None) -> list[Word]:
+    """Word boxes mapped back through the inverse of a `photo` homography (degrade D9).
+
+    A photo page's text layer holds the clean page's words with warped boxes. The words are
+    the same, so the ground truth is the clean page's: parsing the tilted boxes directly
+    lost about two thirds of the rows (tilted words do not group into lines).
+
+    Each stored box is the axis-aligned hull of a word rotated by the homography's angle t.
+    Its centre maps back through the inverse; its width and height come from solving
+    W = w|cos t| + h|sin t|, H = h|cos t| + w|sin t| for the word's own w and h."""
+    if homography is None:
+        return words
+    matrix = np.asarray(homography, dtype=float)
+    inverse = np.linalg.inv(matrix)
+    angle = np.arctan2(matrix[1, 0], matrix[0, 0])
+    c, s = abs(np.cos(angle)), abs(np.sin(angle))
+    det = c * c - s * s
+    out: list[Word] = []
+    for word in words:
+        x0, y0, x1, y1 = word.bbox
+        big_w, big_h = x1 - x0, y1 - y0
+        w = max((big_w * c - big_h * s) / det, 1.0) if det > 1e-6 else big_w
+        h = max((big_h * c - big_w * s) / det, 1.0) if det > 1e-6 else big_h
+        cx, cy, cw = inverse @ np.array([(x0 + x1) / 2, (y0 + y1) / 2, 1.0])
+        cx, cy = cx / cw, cy / cw
+        bbox = (float(cx - w / 2), float(cy - h / 2), float(cx + w / 2), float(cy + h / 2))
+        out.append(word.model_copy(update={"bbox": bbox}))
+    return out
+
+
 def parse_text_layer(
     gt: TextLayerGT,
     *,
@@ -338,7 +370,7 @@ def parse_text_layer(
     """Parse one digital page's ground truth from its positioned words."""
     ov = overrides or BankOverrides()
     statement = StatementPage(bank=bank, page_no=page_no)
-    lines = group_lines(list(gt.gt_words))
+    lines = group_lines(unwarp_words(list(gt.gt_words), gt.homography))
     band = header_band(lines, ov.date_format)
 
     above = lines if band is None else lines[: band[0]]

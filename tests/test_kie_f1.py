@@ -86,3 +86,20 @@ def test_blank_string_is_null_on_both_sides():
     assert r.field_exact == 1 and not r.false_accept
     r = _by_field(score_fields({"x": "abc"}, {"x": ""}))["x"]
     assert r.false_accept is True
+
+
+def test_lenient_finds_true_value_inside_a_labelled_prediction():
+    rows = _by_field(
+        score_fields(
+            {"price": "ราคาตั๋ว / Ticket Price: 5 บาท / Baht", "seat": "25", "no": "x" * 80 + " 5"},
+            {"price": "5", "seat": "5", "no": "5"},
+        )
+    )
+    assert rows["price"].field_exact == 0 and rows["price"].field_lenient == 1
+    assert rows["seat"].field_lenient == 0  # "5" is not a token of "25"
+    assert rows["no"].field_lenient == 0  # too much extra text to count as found
+
+
+def test_lenient_is_never_below_exact():
+    rows = score_fields({"a": "x", "b": None}, {"a": "x", "b": None})
+    assert all(r.field_lenient >= r.field_exact for r in rows)

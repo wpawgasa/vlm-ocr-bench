@@ -37,3 +37,6 @@ build/
 /looloo-ocr-*.json
 *service-account*.json
 .dvc/config.local
+
+# large local wheels for image builds (paddle-pipeline GPU)
+/.devcontainer/wheels/

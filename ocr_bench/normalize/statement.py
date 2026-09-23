@@ -189,6 +189,7 @@ HEADER_LABELS: tuple[tuple[str, str], ...] = (
     ("account_name", "name"),
     ("account_name", "ชื่อ"),
     ("account_no", "account number"),
+    ("account_no", "เลขที่บัญชีเงินฝาก"),
     ("account_no", "account no"),
     ("account_no", "acct no"),
     ("account_no", "เลขที่บัญชี"),
@@ -196,28 +197,46 @@ HEADER_LABELS: tuple[tuple[str, str], ...] = (
     ("period", "statement period"),
     ("period", "period"),
     ("period", "รอบรายการบัญชี"),
+    ("period", "รอบระหว่างวันที่"),
+    ("period", "หว่างวันที่"),  # KBank's text layer splits "รอบระหว่างวันที่" as "รอบร หว่างวันที่"
     ("period", "รอบบัญชี"),
     ("closing_balance", "ending balance"),
     ("closing_balance", "closing balance"),
     ("closing_balance", "ยอดคงเหลือปลายงวด"),
+    ("closing_balance", "ยอดยกไป"),
     ("opening_balance", "beginning balance"),
     ("opening_balance", "opening balance"),
     ("opening_balance", "ยอดยกมา"),
     ("total_debit", "total withdrawals"),
+    ("total_debit", "รวมถอนเงิน"),
     ("total_debit", "total withdrawal"),
     ("total_debit", "รวมรายการถอน"),
     ("total_debit", "รวมถอน"),
     ("total_credit", "total deposits"),
+    ("total_credit", "รวมฝากเงิน"),
     ("total_credit", "total deposit"),
     ("total_credit", "รวมรายการฝาก"),
     ("total_credit", "รวมฝาก"),
+)
+#: Header labels that name no scored field. They end a value ("หน้าที่/Page" is never an
+#: account name) and take a slot when labels and values come as separate columns.
+OTHER_HEADER_LABELS: tuple[str, ...] = (
+    "หน้าที่",
+    "page",
+    "สกุลเงิน",
+    "currency",
+    "เลขที่อ้างอิง",
+    "reference code",
+    "ref. no",
+    "สาขาเจ้าของบัญชี",
+    "owner branch",
 )
 HEADER_FIELDS = ("account_no", "account_name", "period", "opening_balance", "closing_balance")
 _LABELS_BY_FIELD: dict[str, list[str]] = {}
 for _field, _label in HEADER_LABELS:
     _LABELS_BY_FIELD.setdefault(_field, []).append(_label)
 
-_VALUE_SEPARATORS = " \t:：-–—/|."
+_VALUE_SEPARATORS = " \t:：-–—/|.#*"
 _PERIOD_SPLIT_RE = re.compile(r"\s+(?:-|–|—|to|ถึง)\s+|\s+(?:to|ถึง)\s+", re.IGNORECASE)
 
 
@@ -242,32 +261,139 @@ def _label_match(line: str) -> tuple[str, int] | None:
     return field, end
 
 
+def _all_labels() -> list[str]:
+    labels = [label for _, label in HEADER_LABELS] + list(OTHER_HEADER_LABELS)
+    return sorted(set(labels), key=len, reverse=True)
+
+
+_ALL_LABELS = _all_labels()
+
+
+def _starts_with_label(text: str) -> bool:
+    low = canonical_text(text).lower().lstrip(_VALUE_SEPARATORS)
+    return any(low.startswith(label) for label in _ALL_LABELS)
+
+
+def _is_label_only(text: str) -> bool:
+    """A line made only of labels and separators, like "เลขที่บัญชี/Account No."."""
+    low = canonical_text(text).lower()
+    if not low.strip(_VALUE_SEPARATORS):
+        return False
+    for label in _ALL_LABELS:
+        low = low.replace(label, " ")
+    return not low.strip(_VALUE_SEPARATORS)
+
+
+_MONEY_RE = re.compile(r"\d[\d,]*\.\d{2}(?!\d)")
+#: Fields whose shape check is strong enough to pick a value out of an unaligned column.
+_STRONG_FIELDS = frozenset(
+    {"account_no", "period", "opening_balance", "closing_balance", "total_debit", "total_credit"}
+)
+
+
+def _valid_value(field: str, value: str) -> bool:
+    """Whether `value` can be `field`'s value: never another label, and shaped like the field
+    (an account number has at least 4 digits, amounts parse, a period has a digit)."""
+    value = value.strip(_VALUE_SEPARATORS).strip()
+    if not value or _starts_with_label(value):
+        return False
+    digits = sum(ch.isdigit() for ch in value)
+    if field == "account_no":
+        return digits >= 4
+    if field == "account_name":
+        return any(ch.isalpha() for ch in value) and digits <= 0.3 * len(value)
+    if field == "period":
+        return digits > 0
+    return _MONEY_RE.search(value) is not None  # a balance/total has cents ("510 รายการ" has not)
+
+
+def _single_field(line: str) -> str | None:
+    """The field a label-only line names, or None when it names none or several (a
+    multi-column label line such as "ชื่อ/Name เลขที่บัญชี/Account No." cannot be paired).
+    Labels are claimed longest first, so "name" inside "account name" is not counted twice."""
+    low = canonical_text(line).lower()
+    field_of = {label: field for field, label in HEADER_LABELS}
+    fields: set[str] = set()
+    for label in sorted(field_of, key=len, reverse=True):
+        if label in low:
+            fields.add(field_of[label])
+            low = low.replace(label, " ")
+    return fields.pop() if len(fields) == 1 else None
+
+
+def _pair_columns(fields: list[str | None], values: list[str]) -> list[tuple[str, str]]:
+    """Pair a run of label-only lines with the value lines after it: by position when the
+    counts match (the column layout), else each field with a strong shape check takes the
+    first unused value that fits it (a model dropped or merged a value; a name cannot be told
+    from other text, so it is left unset)."""
+    if len(fields) == len(values):
+        return [(f, v) for f, v in zip(fields, values, strict=True) if f is not None]
+    pairs: list[tuple[str, str]] = []
+    used: set[int] = set()
+    for field in fields:
+        if field not in _STRONG_FIELDS:
+            continue
+        for i, value in enumerate(values):
+            if i not in used and _valid_value(field, value):
+                used.add(i)
+                pairs.append((field, value))
+                break
+    return pairs
+
+
 def extract_header_fields(lines: Sequence[str]) -> dict[str, str]:
     """Raw `{field: value}` from labelled lines; the first (topmost) match per field wins.
 
-    [IMPLEMENTER DECIDES] the value is the text after the label on the same line; when
-    that is empty the next line is used, unless it carries a label of its own (the
-    right-aligned label/value pairs of the real statements are always on one line, but
-    a model that emits the label and the value as consecutive lines still parses).
+    Three layouts are read:
+    - label and value on one line ("Account Number XXX-X-XX446-5");
+    - a run of label-only lines followed by the same number of value lines, paired in order
+      (KBank's header box, which models emit column by column; a single label line followed
+      by its value is the one-row case);
+    - several labels on one line with their values missing (redacted statements).
+    A value is kept only if it fits the field (`_valid_value`): a following line that is
+    itself a label ("สกุลเงิน/Currency THB", "หน้าที่ 1/21") is never taken as a value.
     """
-    canonical = [canonical_text(line) for line in lines]
+    canonical = [c for c in (canonical_text(line) for line in lines) if c.strip()]
     found: dict[str, str] = {}
-    for index, line in enumerate(canonical):
-        if not line:
+
+    def keep(field: str, value: str) -> None:
+        value = value.strip(_VALUE_SEPARATORS).strip()
+        if field not in found and _valid_value(field, value):
+            found[field] = value
+
+    i = 0
+    while i < len(canonical):
+        line = canonical[i]
+        if _is_label_only(line):
+            run = [line]
+            j = i + 1
+            while j < len(canonical) and _is_label_only(canonical[j]):
+                run.append(canonical[j])
+                j += 1
+            values: list[str] = []
+            k = j
+            while (
+                k < len(canonical)
+                and len(values) < len(run)
+                and not _starts_with_label(canonical[k])
+                and _label_match(canonical[k]) is None  # a line with its own label is not a value
+            ):
+                values.append(canonical[k])
+                k += 1
+            fields = [_single_field(label) for label in run]
+            for field, value in _pair_columns(fields, values):
+                keep(field, value)
+            i = k
             continue
         match = _label_match(line)
-        if match is None:
-            continue
-        field, end = match
-        if field in found:
-            continue
-        value = line[end:].strip(_VALUE_SEPARATORS).strip()
-        if not value and index + 1 < len(canonical):
-            nxt = canonical[index + 1]
-            if nxt and _label_match(nxt) is None:
-                value = nxt
-        if value:
-            found[field] = value
+        if match is not None:
+            field, end = match
+            value = line[end:]
+            nxt = canonical[i + 1] if i + 1 < len(canonical) else ""
+            if not _valid_value(field, value) and nxt and not _starts_with_label(nxt):
+                value = f"{value} {nxt}"  # "รวมถอนเงิน 510 รายการ" / "418,694.01"
+            keep(field, value)
+        i += 1
     return found
 
 
@@ -449,19 +575,29 @@ def _row_values(cells: Sequence[str], roles: Sequence[str | None]) -> RowValues:
     return RowValues(values=values)
 
 
+_HTML_TABLE_RE = re.compile(r"<table\b.*?(?:</table>|$)", re.DOTALL | re.IGNORECASE)
+
+
 def _text_lines(page: NormalizedPage) -> list[str]:
     """Lines of the page's non-table blocks, in block order.
 
-    Only blocks are read (never `NormalizedPage.text`, which embeds table HTML in each
-    model's own reading order), so two models with the same tables and text blocks map
-    to identical statement pages.
+    Blocks are read, not `NormalizedPage.text` (which embeds table HTML in each model's own
+    reading order), so two models with the same tables and text blocks map to identical
+    statement pages. Only a page with no text blocks at all (the markdown parsers) falls
+    back to its text with the tables cut out.
     """
     lines: list[str] = []
     for block in page.blocks:
         if block.type in (BlockType.table, BlockType.figure):
             continue
         lines.extend(block.text.splitlines())
-    return lines
+    has_text_blocks = any(b.type in (BlockType.text, BlockType.header) for b in page.blocks)
+    if has_text_blocks or not page.text:
+        return lines
+    # Markdown parsers (typhoon, ovis) give only table/figure blocks: read the page text
+    # with its tables removed, so the header is not silently lost for those models.
+    text = _HTML_TABLE_RE.sub("\n", page.text)
+    return [line for line in text.splitlines() if not line.lstrip().startswith("|")]
 
 
 def map_statement_page(

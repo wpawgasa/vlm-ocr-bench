@@ -26,6 +26,11 @@ scripts/serve_paddleocr_vl.sh up    # PaddleOCR-VL vLLM + PaddleX pipeline serve
 uv run ocrbench infer --run-id 2026-09-22-a --models paddleocr_vl
 ```
 
+**Disk:** `vllm/vllm-openai:v0.11.0` was removed from this host on 2026-09-23 to make room for the
+GPU PaddleX pipeline image. dots.ocr and typhoon ran on
+`vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c`;
+pull that digest (re-tag as `v0.11.0`) before their latency runs.
+
 `configs/run.yaml` still lists teleocr/dotsocr: it is a `prepare` dependency, so changing it
 needs `config.resolved.yaml` regenerated and `dvc commit -f prepare`, which fails while
 `data/statements` is missing from the remote. Pass `--models` explicitly until then.

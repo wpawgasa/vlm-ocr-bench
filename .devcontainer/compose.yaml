@@ -175,13 +175,15 @@ services:
 
   paddle_pipeline:
     # PaddleX's official PaddleOCR-VL-1.6 pipeline server (layout on CPU) -> paddleocr_vl.
+    # One server handles one page at a time and leaves vLLM mostly idle, so run several:
+    # `--scale paddle_pipeline=N`; the harness reaches them round-robin via Docker DNS.
     image: ocr-bench/paddle-pipeline:paddleocr3.7.0
     build:
       context: .
       dockerfile: paddle-pipeline.Dockerfile
     profiles: ["paddle"]
     restart: "no"
-    ports: ["${PADDLE_PIPELINE_PORT:-8006}:8080"]
+    ports: ["${PADDLE_PIPELINE_PORTS:-8006-8013}:8080"]
     environment:
       VL_SERVER_URL: http://paddleocr_vl:8000/v1
     volumes:

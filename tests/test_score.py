@@ -284,3 +284,21 @@ def test_score_missing_predictions_exits_2(tmp_path, monkeypatch):
     result = runner.invoke(app, ["score", "--run-id", "r2"])
     assert result.exit_code == 2
     assert "ocrbench infer" in result.output
+
+
+def test_question_reply_without_fields_is_reparsed_at_score_time():
+    from ocr_bench.metrics.dispatch import _pred_fields
+    from ocr_bench.schemas import Condition, NormalizedPage, PredictionRow, RawPrediction
+
+    pred = PredictionRow(
+        sample_id="s",
+        condition=Condition.clean,
+        model="m",
+        prompt_version="question-v1",
+        raw=RawPrediction(text='{"ราคา": 1,000.00, "ขบวน": "28'),
+        normalized=NormalizedPage(parse_error="invalid JSON: ..."),
+        latency_ms=1.0,
+        prompt_tokens=1,
+        completion_tokens=1,
+    )
+    assert _pred_fields(pred) == {"ราคา": "1,000.00"}

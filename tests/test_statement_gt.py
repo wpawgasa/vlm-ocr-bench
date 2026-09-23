@@ -569,3 +569,19 @@ def test_a_row_without_a_date_continues_the_previous_row_s_date():
     page = parse_text_layer_rows(gt, bank="kbank", page_no=1, overrides=None)
     assert [r.date for r in page.rows] == ["2024-03-01", "2024-03-01", "2024-03-03"]
     assert [r.debit for r in page.rows] == [Decimal("10.00"), Decimal("20.00"), None]
+
+
+def test_photo_ground_truth_is_parsed_from_unwarped_words():
+    import numpy as np
+
+    from ocr_bench.metrics.statement_gt import unwarp_words
+    from ocr_bench.schemas import Word
+
+    h = np.array([[0.998, 0.038, -54.7], [-0.074, 1.015, 57.0], [-1.6e-05, 1.4e-05, 1.0]])
+    word = Word(text="1,554.22", bbox=(100.0, 200.0, 180.0, 220.0))
+    corners = np.array([[100, 200, 1], [180, 200, 1], [180, 220, 1], [100, 220, 1]]) @ h.T
+    xs, ys = corners[:, 0] / corners[:, 2], corners[:, 1] / corners[:, 2]
+    warped = Word(text=word.text, bbox=(xs.min(), ys.min(), xs.max(), ys.max()))
+    (back,) = unwarp_words([warped], h.tolist())
+    assert back.bbox == pytest.approx((100.0, 200.0, 180.0, 220.0), abs=3.0)
+    assert unwarp_words([word], None) == [word]

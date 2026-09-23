@@ -218,10 +218,32 @@ def _json_candidates(text: str) -> list[str]:
     return candidates
 
 
-def _json_fields(raw: str, ctx: ParseContext) -> NormalizedPage:
-    text = raw.strip()
-    if ctx.task == Task.classify:
-        return NormalizedPage(text=text, label=text)
+# `"price": 1,000.00` — a bare number with thousands separators, which JSON rejects.
+_BARE_GROUPED_NUMBER_RE = re.compile(r"(:\s*)(-?\d{1,3}(?:,\d{3})+(?:\.\d+)?)(?=\s*[,}\]\n])")
+_JSON_PAIR_RE = re.compile(
+    r'"((?:[^"\\]|\\.)*)"\s*:\s*("(?:[^"\\]|\\.)*"|-?\d[\d,]*(?:\.\d+)?|true|false|null)'
+)
+
+
+def salvage_json_pairs(text: str) -> dict[str, str | None]:
+    """Every complete `"key": scalar` pair of a reply that is not valid JSON (cut off at
+    `max_tokens`, or with bare `1,000.00` numbers), in order; nested keys lose their prefix."""
+    fields: dict[str, str | None] = {}
+    for match in _JSON_PAIR_RE.finditer(text):
+        try:
+            key = json.loads(f'"{match.group(1)}"')
+            token = match.group(2)
+            value = json.loads(token) if token.startswith('"') else token
+        except json.JSONDecodeError:
+            continue
+        if value is None or token in ("true", "false"):
+            value = None if value is None else token
+        fields.setdefault(key, None if value is None else str(value))
+    return fields
+
+
+def _parse_fields(text: str) -> tuple[dict[str, FieldValue] | None, str]:
+    """Fields of the first JSON candidate in `text` that parses, or (None, last error)."""
     last_error = "empty output"
     for candidate in _json_candidates(text):
         if not candidate:
@@ -231,9 +253,33 @@ def _json_fields(raw: str, ctx: ParseContext) -> NormalizedPage:
         except ValueError as exc:
             last_error = str(exc)
             continue
-        fields = {k: FieldValue(value=v, raw=v) for k, v in flatten_fields(parsed).items()}
+        return {k: FieldValue(value=v, raw=v) for k, v in flatten_fields(parsed).items()}, ""
+    return None, last_error
+
+
+def _json_fields(raw: str, ctx: ParseContext) -> NormalizedPage:
+    """JSON answer to a benchmark question. Replies that are not valid JSON are repaired in
+    two recorded steps (`parse_error` says which): bare `1,000.00` numbers are quoted, and a
+    reply that still fails keeps every complete `"key": value` pair (`salvage_json_pairs`)."""
+    text = raw.strip()
+    if ctx.task == Task.classify:
+        return NormalizedPage(text=text, label=text)
+    fields, error = _parse_fields(text)
+    if fields is not None:
         return NormalizedPage(text=text, fields=fields)
-    return NormalizedPage(text=text, parse_error=f"invalid JSON: {last_error[:200]}")
+    quoted = _BARE_GROUPED_NUMBER_RE.sub(r'\1"\2"', text)
+    if quoted != text:
+        fields, _ = _parse_fields(quoted)
+        if fields is not None:
+            return NormalizedPage(text=text, fields=fields, parse_error="quoted bare numbers")
+    salvaged = salvage_json_pairs(text)
+    if salvaged:
+        return NormalizedPage(
+            text=text,
+            fields={k: FieldValue(value=v, raw=v) for k, v in salvaged.items()},
+            parse_error=f"salvaged {len(salvaged)} fields from invalid JSON",
+        )
+    return NormalizedPage(text=text, parse_error=f"invalid JSON: {error[:200]}")
 
 
 # --- dots.ocr layout JSON -------------------------------------------------------------------

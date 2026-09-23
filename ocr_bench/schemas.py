@@ -311,6 +311,7 @@ class FieldResult(BaseModel):
     gt: str | None
     field_exact: int
     field_fuzzy: int
+    field_lenient: int = 0  # kie_f1: true value found as a token in a short prediction
     false_accept: bool = False
     false_reject: bool = False
     domain: str | None = None

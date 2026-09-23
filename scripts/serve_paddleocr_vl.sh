@@ -9,7 +9,7 @@ files=(-f .devcontainer/compose.yaml)
 dc() { docker compose -p ocr-bench "${files[@]}" --profile paddle "$@"; }
 
 case "${1:-up}" in
-  up)   dc up -d --wait paddleocr_vl paddle_pipeline && echo "paddleocr_vl + paddle_pipeline ready" ;;
+  up)   dc up -d --wait --scale paddle_pipeline="${PADDLE_PIPELINES:-4}" paddleocr_vl paddle_pipeline && echo "paddleocr_vl + paddle_pipeline x${PADDLE_PIPELINES:-4} ready" ;;
   down) dc stop paddle_pipeline paddleocr_vl ;;
   logs) dc logs -f paddleocr_vl paddle_pipeline ;;
   *)    echo "usage: $0 [up|down|logs]" >&2; exit 2 ;;

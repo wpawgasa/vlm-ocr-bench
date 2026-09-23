@@ -231,3 +231,75 @@ def test_table_row_without_a_date_continues_the_previous_row():
     mapped = map_statement_page(_page([table]), bank="kbank", page_no=1, overrides=None)
     assert [r.date for r in mapped.rows] == ["2024-03-01", "2024-03-01", "2024-03-03"]
     assert [r.debit for r in mapped.rows] == [Decimal("10.00"), Decimal("20.00"), None]
+
+
+# --- header fields ----------------------------------------------------------------------------
+
+from ocr_bench.normalize.statement import extract_header_fields  # noqa: E402
+
+KBANK_TH_COLUMNS = [
+    "ชื่อบัญชี",
+    "หน้าที่ 1/21 (1117)",
+    "เลขที่อ้างอิง",
+    "เลขที่บัญชีเงินฝาก",
+    "รอบระหว่างวันที่",
+    "สาขาเจ้าของบัญชี",
+    "25030508129248897826",
+    "050-8-64757-3",
+    "01/09/2024 - 28/02/2025",
+    "สาขาบิ๊กซี ศรีนครินทร์",
+    "ยอดยกไป",
+    "33,902.62",
+    "รวมถอนเงิน 510 รายการ",
+    "418,694.01",
+]
+
+
+def test_header_label_and_value_columns_are_paired_in_order():
+    found = extract_header_fields(KBANK_TH_COLUMNS)
+    assert found["account_no"] == "050-8-64757-3"
+    assert found["period"] == "01/09/2024 - 28/02/2025"
+    assert found["closing_balance"] == "33,902.62"
+    assert found["total_debit"].endswith("418,694.01")  # not the item count 510
+    assert "account_name" not in found  # the next line is a page label, not a name
+
+
+def test_header_columns_with_a_missing_value_use_field_shape():
+    lines = [line for line in KBANK_TH_COLUMNS if line != "25030508129248897826"]
+    found = extract_header_fields(lines)
+    assert found["account_no"] == "050-8-64757-3"
+    assert found["period"] == "01/09/2024 - 28/02/2025"
+
+
+def test_header_redacted_values_are_not_taken_from_neighbouring_labels():
+    found = extract_header_fields(
+        [
+            "ชื่อ/Name เลขที่บัญชี/Account No.",
+            "สกุลเงิน/Currency THB",
+            "รอบรายการบัญชี / Statement Period 01/07/2022 - 28/06/2023",
+        ]
+    )
+    assert found == {"period": "01/07/2022 - 28/06/2023"}
+
+
+def test_header_label_and_value_on_one_line():
+    found = extract_header_fields(["Account Number XXX-X-XX446-5", "ENDING BALANCE 1.32"])
+    assert found == {"account_no": "XXX-X-XX446-5", "closing_balance": "1.32"}
+
+
+def test_markdown_page_without_text_blocks_still_maps_its_header():
+    page = NormalizedPage(
+        text="Account Number 123-4-56789-0\n\n<table><tr><td>Date</td></tr></table>\n",
+        blocks=[
+            Block(type=BlockType.table, text="<table><tr><td>Date</td></tr></table>"),
+            Block(type=BlockType.footer, text="1"),
+        ],
+    )
+    assert map_statement_page(page, bank="kbank", page_no=1).account_no == "123-4-56789-0"
+
+
+def test_header_value_line_with_its_own_label_is_not_consumed():
+    found = extract_header_fields(
+        ["ชื่อบัญชี", "ซ.ลาซาล ต.บางนา จ.กทม. 10260 เลขที่บัญชีเงินฝาก 050-8-64757-3"]
+    )
+    assert found["account_no"] == "050-8-64757-3"

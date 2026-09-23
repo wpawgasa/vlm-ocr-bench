@@ -98,6 +98,7 @@ def _field_table(fields: Sequence[FieldResult], n_resamples: int, seed: int) -> 
             keys = {"is_critical": f.is_critical, "model": f.model}
             yield keys, "field_exact", f.sample_id, float(f.field_exact)
             yield keys, "field_fuzzy", f.sample_id, float(f.field_fuzzy)
+            yield keys, "field_lenient", f.sample_id, float(f.field_lenient)
             if f.gt is None:  # false-accept opportunities: no true value
                 yield keys, "fa_rate", f.sample_id, float(f.false_accept)
             else:  # false-reject opportunities: a true value exists

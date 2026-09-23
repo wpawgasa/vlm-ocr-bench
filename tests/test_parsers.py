@@ -282,3 +282,26 @@ def test_parsers_never_raise(name, raw):
 def test_unknown_parser_name_is_a_parse_error():
     page = parse("nope", "text", ParseContext())
     assert page.parse_error is not None and "nope" in page.parse_error
+
+
+# --- json_fields repair ---------------------------------------------------------------------
+
+
+def test_json_fields_quotes_bare_grouped_numbers():
+    from ocr_bench.models.parsers import ParseContext, parse
+    from ocr_bench.schemas import Task
+
+    page = parse("json_fields", '{"กุ้ง": 1,000.00, "รวม": 3,370.00}', ParseContext(task=Task.kie))
+    assert page.parse_error == "quoted bare numbers"
+    assert {k: v.value for k, v in page.fields.items()} == {"กุ้ง": "1,000.00", "รวม": "3,370.00"}
+
+
+def test_json_fields_salvages_complete_pairs_of_a_cut_off_reply():
+    from ocr_bench.models.parsers import ParseContext, parse
+    from ocr_bench.schemas import Task
+
+    page = parse(
+        "json_fields", '{"ขบวน": "280", "ราคา": "25", "ค่าธรรม', ParseContext(task=Task.kie)
+    )
+    assert page.parse_error == "salvaged 2 fields from invalid JSON"
+    assert {k: v.value for k, v in page.fields.items()} == {"ขบวน": "280", "ราคา": "25"}

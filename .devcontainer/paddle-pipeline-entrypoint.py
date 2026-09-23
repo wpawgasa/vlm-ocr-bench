@@ -25,7 +25,14 @@ with open(DST, "w", encoding="utf-8") as f:
     yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
 
 port = os.environ.get("PORT", "8080")
-argv = ["paddlex", "--serve", "--pipeline", DST, "--device", "cpu"]
+argv = [
+    "paddlex",
+    "--serve",
+    "--pipeline",
+    DST,
+    "--device",
+    os.environ.get("PIPELINE_DEVICE", "cpu"),
+]
 argv += ["--host", "0.0.0.0", "--port", port]
 print(" ".join(argv), flush=True)
 sys.stdout.flush()

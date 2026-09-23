@@ -33,6 +33,7 @@ from ocr_bench.metrics.cer_wer import cer, wer
 from ocr_bench.metrics.kie_f1 import FieldScore, micro_prf, score_fields, worst_case_fields
 from ocr_bench.metrics.statement_gt import parse_text_layer, score_statement, worst_case_statement
 from ocr_bench.metrics.ted import first_table, ted, ted_docparse
+from ocr_bench.models.parsers import ParseContext, parse
 from ocr_bench.normalize.statement import map_statement_page
 from ocr_bench.schemas import (
     FieldResult,
@@ -122,9 +123,14 @@ def _pred_table_html(pred: PredictionRow) -> str:
 
 
 def _pred_fields(pred: PredictionRow) -> dict[str, str | None]:
-    return {
-        k: (fv.raw if fv.raw is not None else fv.value) for k, fv in pred.normalized.fields.items()
-    }
+    """The model's answer fields. A benchmark-question reply stored without fields (its JSON
+    did not parse at inference time) is parsed again from the verbatim reply with the current
+    `json_fields` parser, which repairs bare numbers and salvages complete pairs; the result
+    is what a re-run of `infer` would store."""
+    fields = pred.normalized.fields
+    if not fields and pred.prompt_version.startswith("question-") and pred.raw.text.strip():
+        fields = parse("json_fields", pred.raw.text, ParseContext(task=Task.kie)).fields
+    return {k: (fv.raw if fv.raw is not None else fv.value) for k, fv in fields.items()}
 
 
 Overrides = dict[str, BankOverrides]
@@ -323,6 +329,7 @@ def score_sample(
                 gt=f.gt,
                 field_exact=f.field_exact,
                 field_fuzzy=f.field_fuzzy,
+                field_lenient=f.field_lenient,
                 false_accept=f.false_accept,
                 false_reject=f.false_reject,
             )
