@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Same image as the former Drone pipeline: Python 3.11 + uv on Debian bookworm.
+    container: ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+    env:
+      UV_LINK_MODE: copy
+    steps:
+      - uses: actions/checkout@v4
+      # poppler: pdffonts/pdftoppm/pdftotext for the bank-statement ingestion tests
+      - name: System packages
+        run: apt-get update && apt-get install -y --no-install-recommends poppler-utils
+      - name: Install
+        run: uv sync --all-extras --frozen
+      # NLTK METEOR (official ThaiOCRBench scorer) needs WordNet
+      - name: NLTK data
+        run: uv run python -m nltk.downloader -q wordnet omw-1.4
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Test
+        run: uv run pytest -m "not live"

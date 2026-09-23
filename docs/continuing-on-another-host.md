@@ -154,8 +154,9 @@ H100 **and** an L4 session with the same vLLM version and dtype, and #8 needs a 
 - **Client data hygiene:** `data/`, `runs/` and `review/` stay gitignored; only the anonymised
   samples in the report are client-facing. Never put real statement content in tests or fixtures.
   Audit staged files for the key, `.dvc/config.local` and PDFs before each commit.
-- **CI is Drone** (`.drone.yml`, `docker` pipeline on push/PR to `main`). The repo must be
-  activated in https://drone.loolootest.com for builds to run; Gitea Actions is not used.
+- **CI is GitHub Actions** (`.github/workflows/ci.yml`: ruff + `pytest -m "not live"` in the
+  `uv:python3.11-bookworm-slim` container, on push/PR to `main`) on
+  https://github.com/wpawgasa/vlm-ocr-bench. It replaced the Drone pipeline.
 - **Statement quirks already handled** (see `ocr_bench/normalize/statement.py` and
   `metrics/statement_gt.py`): KBank's combined withdrawal/deposit column is split from the data,
   not the header; TTB prints newest-first and signed amounts; BBL opens with a `B/F` row; KTB and
