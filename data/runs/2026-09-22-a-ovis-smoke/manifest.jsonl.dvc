@@ -1,0 +1,5 @@
+outs:
+- md5: 802440fe7b8457252b9d9a69eb0e62c3
+  size: 4721
+  hash: md5
+  path: manifest.jsonl

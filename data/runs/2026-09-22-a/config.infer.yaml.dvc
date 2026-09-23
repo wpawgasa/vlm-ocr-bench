@@ -1,5 +1,5 @@
 outs:
-- md5: e67ae467c2d397f38e1d060656bc68d2
-  size: 30532
+- md5: 22e8211548bc8ec5e0661aa46ceadcfd
+  size: 33035
   hash: md5
   path: config.infer.yaml

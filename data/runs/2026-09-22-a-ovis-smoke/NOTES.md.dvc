@@ -1,0 +1,5 @@
+outs:
+- md5: affe390b7ed3a4988f7c9baf4b50bf4d
+  size: 995
+  hash: md5
+  path: NOTES.md

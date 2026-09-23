@@ -14,13 +14,14 @@ OCR 1.5 is now a main model, and OvisOCR2 plus PaddleOCR-VL-1.6 are being added.
 | dots.ocr | 6,846 / 6,846, 0 errors | done (vLLM 0.11.0, bf16) |
 | TeleOCR | 852 / 6,846 | stopped on purpose; kept as evidence |
 | typhoon_ocr15 | 6,846 / 6,846, 0 errors | done (vLLM 0.11.0, bf16); 449 rows hit max_tokens, 457 KIE replies not JSON |
-| OvisOCR2, PaddleOCR-VL-1.6 | — | integrated and unit-tested (tasks 3.10, 3.13); serve on v0.22.1 (3.11), OvisOCR2 Thai gate first (3.12) |
+| OvisOCR2 | — | **screened out**: failed the Thai gate (Chinese in Thai, bank names translated, 6/10 pages loop); evidence in run `2026-09-22-a-ovis-smoke` (DVC-tracked, `NOTES.md`) |
+| PaddleOCR-VL-1.6 | 6,846 / 6,846, 0 errors | done (vLLM 0.22.1 + PaddleX pipeline x4, layout on CPU); 1,149 KIE replies not JSON |
 
 Serving the new models (single GPU: stop the current server first):
 
 ```bash
 scripts/serve_ovisocr2.sh up        # vllm/vllm-openai:v0.22.1 (VLLM_IMAGE_NEW), --gdn-prefill-backend=triton
-scripts/serve_paddleocr_vl.sh up    # PaddleOCR-VL vLLM + PaddleX pipeline server (layout on CPU)
+scripts/serve_paddleocr_vl.sh up    # PaddleOCR-VL vLLM + 4 PaddleX pipeline replicas (PADDLE_PIPELINES)
 # the dev container needs OVISOCR2_BASE_URL / PADDLEOCR_VL_BASE_URL / PADDLE_PIPELINE_URL
 # (in compose.yaml; recreate it, or pass them with `docker exec -e`)
 uv run ocrbench infer --run-id 2026-09-22-a --models paddleocr_vl

@@ -1,0 +1,5 @@
+outs:
+- md5: 485fa9f906924eececcb943e61532282
+  size: 1901
+  hash: md5
+  path: infer-paddleocr_vl.log
