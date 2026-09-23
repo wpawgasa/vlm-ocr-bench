@@ -372,7 +372,7 @@ def convert_str_to_dict(predict_str: str) -> dict[str, str]:
     try:
         data = json.loads(content)
         success = True
-    except json.JSONDecodeError:
+    except ValueError:  # JSONDecodeError, or a >4300-digit integer (Python 3.11 limit)
         pass
 
     # try parsing with ast.literal_eval
@@ -413,7 +413,7 @@ def generate_combinations(input_dict: Any) -> Any:
         kie_answer = kie_answer.strip('"')
         try:
             kie_answer = json.loads(kie_answer)
-        except json.JSONDecodeError:
+        except ValueError:  # JSONDecodeError, or a >4300-digit integer
             try:
                 kie_answer = ast.literal_eval(kie_answer)
                 if not isinstance(kie_answer, dict):

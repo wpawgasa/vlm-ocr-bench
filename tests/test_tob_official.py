@@ -120,3 +120,11 @@ def test_bmfl_identical_text_is_one():
 def test_bmfl_empty_prediction_is_zero():
     assert tob_score("Fine-grained text recognition", "", "ข้อความ", "") == 0.0
     assert tob_score("Handwritten content extraction", "", "ข้อความ", "") == 0.0
+
+
+def test_kie_reply_with_a_huge_integer_is_unparseable_not_a_crash():
+    from ocr_bench.metrics.tob_official import tob_score
+
+    reply = '{"total": ' + "9" * 8192 + "}"
+    score = tob_score("Key information extraction", reply, '{"total": "5"}', "")
+    assert score == 0.0
