@@ -19,6 +19,7 @@ from PIL import Image, ImageSequence
 from ocr_bench.config import BankStmtConfig, CorpusTargets
 from ocr_bench.data.gt_utils import STATEMENT_CRITICAL_FIELDS
 from ocr_bench.data.manifest import PreparedSample
+from ocr_bench.data.pdf_repair import repair_tounicode
 from ocr_bench.schemas import NoGT, Source, Task, TextLayerGT, Word
 
 _DOCUMENT_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
@@ -182,6 +183,7 @@ def prepare_statements(cfg: BankStmtConfig) -> tuple[list[PreparedSample], dict]
     banks_seen: set[str] = set()
     multipage_files = 0
     text_layer_unusable = 0
+    text_layer_repaired = 0
     samples: list[PreparedSample] = []
 
     # Resolve every file's bank before any rasterization so a mapping gap fails
@@ -200,6 +202,8 @@ def prepare_statements(cfg: BankStmtConfig) -> tuple[list[PreparedSample], dict]
             f"(add a pattern to bank_map and the bank to banks):\n  " + "\n  ".join(unknown)
         )
 
+    # Removed after the loop; its finalizer also removes it if ingestion raises.
+    repair_dir = tempfile.TemporaryDirectory()
     for path, bank in resolved:
         bank_counters[bank] += 1
         idx = bank_counters[bank]
@@ -210,11 +214,19 @@ def prepare_statements(cfg: BankStmtConfig) -> tuple[list[PreparedSample], dict]
             n_pages = _page_count(path)
             if n_pages > 1:
                 multipage_files += 1
+            # Text comes from a copy with broken ToUnicode maps rebuilt (KTB); the image
+            # is always rasterized from the original.
+            text_source = path
+            if doc_type == "digital":
+                repaired_pdf = Path(repair_dir.name) / f"{bank}-{idx:04d}.pdf"
+                if repair_tounicode(path, repaired_pdf):
+                    text_source = repaired_pdf
+                    text_layer_repaired += n_pages
             for page_no in range(1, n_pages + 1):
                 image = rasterize_page(path, page_no, cfg.dpi)
                 gt: TextLayerGT | NoGT = NoGT(gt_kind="none")
                 if doc_type == "digital":
-                    layer = text_layer(path, page_no, cfg.dpi)
+                    layer = text_layer(text_source, page_no, cfg.dpi)
                     if text_layer_usable(layer.gt_text):
                         gt = layer
                     else:
@@ -263,11 +275,14 @@ def prepare_statements(cfg: BankStmtConfig) -> tuple[list[PreparedSample], dict]
                     )
                 )
 
+    repair_dir.cleanup()
+
     info = {
         "statement_pages_by_doc_type": dict(pages_by_doc_type),
         "statement_banks": sorted(banks_seen),
         "statement_files": len(files),
         "statement_multipage_files": multipage_files,
         "statement_text_layer_unusable": text_layer_unusable,
+        "statement_text_layer_repaired": text_layer_repaired,
     }
     return samples, info

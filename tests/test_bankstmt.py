@@ -218,6 +218,17 @@ class TestTextLayerUsable:
         assert isinstance(kbank.gt, TextLayerGT)
         assert info["statement_text_layer_unusable"] == 1
 
+    def test_identity_tounicode_page_is_repaired_into_gt(
+        self, statements_dir_with_identity_tounicode
+    ):
+        samples, info = prepare_statements(_cfg(statements_dir_with_identity_tounicode))
+        ktb = next(s for s in samples if s.bank == "ktb")
+        assert isinstance(ktb.gt, TextLayerGT)
+        assert "Statement Balance 1,000.00" in ktb.gt.gt_text
+        assert any(w.text == "Balance" for w in ktb.gt.gt_words)
+        assert info["statement_text_layer_unusable"] == 0
+        assert info["statement_text_layer_repaired"] == 1
+
 
 class TestCoverageWarnings:
     def test_digital_target_counts_only_usable_text_layers(self):
