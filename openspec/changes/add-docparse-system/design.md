@@ -95,6 +95,8 @@ line_reader: paddle_crop
 
 The OCR VLMs are fixed-prompt models and cannot classify or answer focused prompts, hence the separate instruction-following VLM. All three vLLM servers share the H100 at `gpu-memory-utilization` 0.25 / 0.30 / 0.25. TrOCR and the detector use what is left.
 
+**Checkpoints (task 2.1):** `Qwen/Qwen3-VL-8B-Instruct` and `Qwen/Qwen3-8B`, both bf16 with no quantization, on `VLLM_IMAGE_NEW` (v0.22.1; Qwen3-VL needs vLLM ≥ 0.11). Both run with `max-model-len` 16384. `qwen3vl` accepts 2 images per prompt, for two-page classification. `qwen3` serves tool calls with the `hermes` parser; thinking is turned off per request through `chat_template_kwargs`. The bf16 weights take about 16.3 GiB of the 23.9 GiB (0.30) budget and 15.3 GiB of the 19.9 GiB (0.25) budget. At 147 KB per token of KV cache, that leaves roughly 30k tokens for `qwen3vl` and 20k for `qwen3`, after activations and CUDA graphs. Both fit one 16,384-token request, but `qwen3` has little room for concurrent long requests. If vLLM refuses to start because the KV cache is smaller than `max-model-len`, raise `QWEN3_GPU_MEM`. The throughput measured in task 2.1 goes in the report. The compose services are `qwen3vl` and `qwen3` (profile `docparse`), and `PADDLEOCR_VL_GPU_MEM=0.25` sets Paddle's share.
+
 *Alternative:* prompting typhoon-ocr1.5 for classification. Rejected because of the measured non-JSON rate.
 *Alternative:* a docparse-only model config. Rejected: one served model would be described in two places, and the harness could not benchmark the role models.
 
@@ -229,4 +231,4 @@ This is a new package, so nothing needs migrating. The new vLLM services are opt
 
 ## Open Questions
 
-- The exact Qwen3-VL and Qwen3 checkpoints and quantization can be settled when the services are brought up in task 2.1. They go in the `qwen3vl` and `qwen3` registry entries. The model roles and interfaces don't depend on them.
+- Settled in task 2.1: the checkpoints are Qwen3-VL-8B-Instruct and Qwen3-8B in bf16, with no quantization (D3). Whether the KV-cache headroom holds under concurrent verifier and extraction load is measured on the H100.

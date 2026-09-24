@@ -7,6 +7,8 @@
 #   ovisocr2 – vLLM OpenAI server for ATH-MaaS/OvisOCR2        (profile: ovis, VLLM_IMAGE_NEW)
 #   paddleocr_vl + paddle_pipeline – PaddleOCR-VL-1.6 vLLM server + PaddleX pipeline server
 #                                                              (profile: paddle, VLLM_IMAGE_NEW)
+#   qwen3vl  – vLLM OpenAI server for Qwen/Qwen3-VL-8B-Instruct (profile: docparse, VLLM_IMAGE_NEW)
+#   qwen3    – vLLM OpenAI server for Qwen/Qwen3-8B, tool calling (profile: docparse, VLLM_IMAGE_NEW)
 #
 # Start the model servers (from the host or from inside the dev container):
 #   docker compose -f .devcontainer/compose.yaml --profile serve up -d
@@ -57,6 +59,8 @@ services:
       OVISOCR2_BASE_URL: http://ovisocr2:8000/v1
       PADDLEOCR_VL_BASE_URL: http://paddleocr_vl:8000/v1
       PADDLE_PIPELINE_URL: http://paddle_pipeline:8080
+      QWEN3VL_BASE_URL: http://qwen3vl:8000/v1
+      QWEN3_BASE_URL: http://qwen3:8000/v1
     volumes:
       - ..:/workspaces/vlm-ocr-bench:cached
       # Host data dir: ThaiOCRBench exports, bank statements, runs/. Default is ./data in the repo
@@ -169,7 +173,8 @@ services:
       - '--no-enable-prefix-caching'
       - '--mm-processor-cache-gb=0'
       - '--limit-mm-per-prompt={"image": 1}'
-      - '--gpu-memory-utilization=0.9'
+      # 0.25 when it shares the H100 with the docparse servers (docparse design D3).
+      - '--gpu-memory-utilization=${PADDLEOCR_VL_GPU_MEM:-0.9}'
       - '--seed=0'
       - '--max-logprobs=5'
 
@@ -191,6 +196,48 @@ services:
     depends_on:
       paddleocr_vl:
         condition: service_healthy
+
+  # docparse (openspec add-docparse-system, design D3): the instruction-following models.
+  # With the Paddle pipeline they share one H100 at 0.25 (paddleocr_vl) / 0.30 (qwen3vl) /
+  # 0.25 (qwen3), so start Paddle with PADDLEOCR_VL_GPU_MEM=0.25 alongside them.
+  qwen3vl:
+    <<: *vllm
+    image: ${VLLM_IMAGE_NEW:-vllm/vllm-openai:v0.22.1}  # Qwen3-VL needs vLLM >= 0.11
+    profiles: ["docparse"]
+    ports: ["${QWEN3VL_PORT:-8014}:8000"]
+    environment:
+      <<: *vllm-env
+      NVIDIA_VISIBLE_DEVICES: ${QWEN3VL_GPU:-0}
+    command:
+      - '--model=Qwen/Qwen3-VL-8B-Instruct'
+      - '--served-model-name=qwen3vl'
+      - '--dtype=${VLLM_DTYPE:-bfloat16}'
+      - '--max-model-len=16384'
+      - '--limit-mm-per-prompt={"image": 2}'  # classify sends the first two pages at once
+      - '--gpu-memory-utilization=${QWEN3VL_GPU_MEM:-0.30}'
+      - '--seed=0'
+      - '--max-logprobs=5'
+
+  qwen3:
+    <<: *vllm
+    image: ${VLLM_IMAGE_NEW:-vllm/vllm-openai:v0.22.1}
+    profiles: ["docparse"]
+    ports: ["${QWEN3_PORT:-8015}:8000"]
+    environment:
+      <<: *vllm-env
+      NVIDIA_VISIBLE_DEVICES: ${QWEN3_GPU:-0}
+    command:
+      - '--model=Qwen/Qwen3-8B'
+      - '--served-model-name=qwen3'
+      - '--dtype=${VLLM_DTYPE:-bfloat16}'
+      - '--max-model-len=16384'
+      # Tool calling for the verifier lookup and the extraction agent; thinking is turned
+      # off per request (chat_template_kwargs), not here.
+      - '--enable-auto-tool-choice'
+      - '--tool-call-parser=hermes'
+      - '--gpu-memory-utilization=${QWEN3_GPU_MEM:-0.25}'
+      - '--seed=0'
+      - '--max-logprobs=5'
 
 volumes:
   uv-cache:
