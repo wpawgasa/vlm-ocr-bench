@@ -27,6 +27,17 @@ scripts/serve_paddleocr_vl.sh up    # PaddleOCR-VL vLLM + 4 PaddleX pipeline rep
 uv run ocrbench infer --run-id 2026-09-22-a --models paddleocr_vl
 ```
 
+Serving docparse (OpenSpec `add-docparse-system`, task 2.1). All three servers share one H100
+at the design D3 memory fractions, so Paddle must be started at 0.25, not its default 0.9:
+
+```bash
+PADDLEOCR_VL_GPU_MEM=0.25 scripts/serve_paddleocr_vl.sh up   # layout and first reading
+scripts/serve_qwen3vl.sh up         # Qwen/Qwen3-VL-8B-Instruct, bf16, 0.30 (classify, verifier crop reads)
+scripts/serve_qwen3.sh up           # Qwen/Qwen3-8B, bf16, 0.25, hermes tool calling (lookup, extraction)
+curl -fs localhost:8014/health && curl -fs localhost:8015/health && echo docparse servers healthy
+# the dev container needs QWEN3VL_BASE_URL / QWEN3_BASE_URL (in compose.yaml; recreate it)
+```
+
 **Disk:** `vllm/vllm-openai:v0.11.0` was removed from this host on 2026-09-23 to make room for the
 GPU PaddleX pipeline image. dots.ocr and typhoon ran on
 `vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c`;
@@ -58,6 +69,35 @@ files after it. `unprotect` makes a private copy, so predictions briefly cost ~1
 
 The raw statements (`data/statements`, `.dir` `c54d95d7…`) were never pushed to the DVC remote:
 `dvc status` shows them deleted on every other host. Push them from the V100 box.
+
+## 0b. docparse: the next H100 session (planned 2026-09-24)
+
+docparse (OpenSpec `add-docparse-system`, issues #1–#8) is built on the dev box without a GPU as
+far as it can go. The GPU steps are batched into one H100 session, ideally after task 2.5
+(the role-to-registry binding), so that real replies can be recorded through the docparse client.
+
+**Before the session (on the V100 dev box):**
+- Push the raw statements, which were never pushed to the DVC remote:
+  `dvc push data/statements.dvc`. Without them, Spike A's statement lines and the `prepare`
+  re-run below both fail on the H100.
+- Merge the task 1.2 PR (#18, KTB text-layer repair) and the task 2.1 PR (docparse servers), so
+  the H100 checkout has both.
+
+**On the H100, in this order:**
+1. **Verify task 2.1:** start the three servers together at the D3 memory fractions (see
+   "Serving docparse" above) and check both health endpoints. If `qwen3` refuses to start because
+   its KV cache is smaller than `max-model-len`, raise `QWEN3_GPU_MEM` and record the value in
+   design D3. Then tick 2.1 in `tasks.md` and in issue #2.
+2. **Spike A (task 1.1):** the line-reader bake-off (`paddle_crop`, a typhoon crop read, dots.ocr
+   grounding and muocr with `no_repeat_ngram_size` 3 and 0). It writes
+   `runs/docparse/spikes/line_readers.json` and is on the critical path: it decides whether the
+   TrOCR branch (group 4) is worth pursuing.
+3. **Record real Qwen3-VL and Qwen3 replies** as test fixtures for tasks 3.1, 5.x and 6.x
+   (`tests/fixtures/responses/`, the harness convention). Never record replies that contain
+   client statement content; the repo is public. Use synthetic or ThaiOCRBench pages.
+4. **Re-run `prepare`** for run `2026-09-22-a` so that the text-layer ground truth includes the
+   70 repaired KTB pages (27 → 97 usable digital pages, `docs/docparse/spike-b-text-layers.md`).
+   Task 1.3 (the frozen eval list) depends on it, and on the manual anchor set (task 1.4).
 
 ## 1. Set the host up
 
