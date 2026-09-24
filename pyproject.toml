@@ -32,6 +32,8 @@ dependencies = [
   "nltk>=3.10.3",
   "jieba>=0.42.1",
   "zss>=1.2.0",
+  "pikepdf>=9",
+  "fonttools>=4.50",
 ]
 
 [project.optional-dependencies]

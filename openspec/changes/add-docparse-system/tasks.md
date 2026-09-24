@@ -8,7 +8,7 @@ The implementer tier follows the model-routing skill:
 ## 1. D0 Spikes and eval foundation
 
 - [ ] 1.1 [Opus] Spike A, the line-reader bake-off on the H100. Use ThaiOCRBench Text recognition plus Fine-grained (≈400 lines) and the lines of the 27 text-layer pages. Compare `paddle_crop`, a typhoon crop read, dots.ocr grounding and the muocr checkpoint. Run muocr with `no_repeat_ngram_size` 3 and 0, and report numeric lines separately. Report CER per condition and the muocr segment throughput in `runs/docparse/spikes/line_readers.json`. Verify the file exists and its per-reader CER is quoted in design D7.
-- [ ] 1.2 [Opus] Spike B, reclaiming text layers. Diagnose why the 103 digital pages fail `text_layer_usable` (`ocr_bench/data/bankstmt.py:101`). Fix causes that are mappable, such as PUA glyphs. Record which pages become usable. Verify with a unit test for each fixed cause and an updated count in a spike note.
+- [x] 1.2 [Opus] Spike B, reclaiming text layers. Diagnose why the 103 digital pages fail `text_layer_usable` (`ocr_bench/data/bankstmt.py:101`). Fix causes that are mappable, such as PUA glyphs. Record which pages become usable. Verify with a unit test for each fixed cause and an updated count in a spike note.
 - [ ] 1.3 [Sonnet] Write `configs/docparse/eval_files.v1.yaml`: every file with a usable text-layer page after 1.2, plus the anchor-set files. Add a loader that exposes the list version. Verify the loader test and that the list is committed as file ids only (no content).
 - [ ] 1.4 [Human] Label the manual anchor set (ocr_bench task 5.8) before any docparse tuning. Verify that `ocrbench review load` accepts the labels and the anchor files appear in the eval list.
 
