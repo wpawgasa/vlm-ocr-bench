@@ -40,3 +40,6 @@ build/
 
 # large local wheels for image builds (paddle-pipeline GPU)
 /.devcontainer/wheels/
+
+# Model checkpoints (GBs). Keep them in DVC/GCS, never in git.
+models/
