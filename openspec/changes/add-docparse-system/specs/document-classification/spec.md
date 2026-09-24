@@ -7,11 +7,11 @@ Assigns each uploaded document a registry class with a confidence, so the verifi
 ## ADDED Requirements
 
 ### Requirement: Document class assignment
-The system SHALL assign each document exactly one registry class id, or `unknown`, with a confidence in [0, 1]. The system SHALL classify from the first two pages. A single-page document SHALL be classified from its one page. The model SHALL be offered only the registry's class ids and descriptions.
+The system SHALL assign each document exactly one registry class id, or `unknown`, with a confidence in [0, 1]. The system SHALL classify from the first two pages. A single-page document SHALL be classified from its one page. The `classifier` role model SHALL be offered only the registry's class ids and descriptions.
 
 #### Scenario: Statement classified
 - **WHEN** a three-page bank statement is uploaded
-- **THEN** the classification artifact records `bank_statement`, a confidence, and the page indices used
+- **THEN** the classification artifact records `bank_statement`, a confidence, the page indices used and the classifier model
 
 #### Scenario: Out-of-registry document
 - **WHEN** a document matches no registry class

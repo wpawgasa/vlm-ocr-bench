@@ -37,6 +37,7 @@ query + parsed doc ─► route query type ─► plan template ─► tools ─
 |---|---|
 | Staged pipeline, agents only in verify and extract | Reproducible, scoreable per stage; rejected: a single orchestrator agent, or a workflow engine |
 | Separate instruction-following VLM (Qwen3-VL-8B) for classify and verifier reads | The OCR VLMs cannot follow free-form prompts (457 of 1,149 KIE replies were not JSON) |
+| Model roles bound to the `ocr_bench` model registry | Switching a role's model is a config edit; one config per served model for both docparse and the harness |
 | Paddle layout by default; never dots `layout_only` | No loops, table HTML; reconciliation needs a second text reading |
 | Alignment voting instead of comparing confidences | Model confidences are not on a common scale; Paddle returns none |
 | A recovery needs 2 agreeing readers and a passing validator | Prevents the verifier from inventing values |

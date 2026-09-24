@@ -53,7 +53,7 @@ Add a new package, `docparse/`, with these modules:
 - `trocr/{data,train}` (only for the conditional fine-tune);
 - `service/{cli,api}`, and `artifacts`.
 
-Configuration lives in `configs/docparse/pipeline.yaml` and `configs/docparse/classes/*.yaml`. docparse imports from `ocr_bench` (clients, parsers, normalizers, mapper, arithmetic). `ocr_bench` imports docparse only in its `docparse` adapter.
+Configuration lives in `configs/docparse/pipeline.yaml` and `configs/docparse/classes/*.yaml`. docparse imports from `ocr_bench` (the model registry and `build_model`, clients, parsers, normalizers, mapper, arithmetic). `ocr_bench` imports docparse only in its `docparse` adapter.
 
 *Alternative:* a separate repo that calls ocr_bench over HTTP. Rejected by the user, because it would duplicate the normalizers and prevent same-run scoring.
 
@@ -67,20 +67,39 @@ Each document gets a directory, `runs/docparse/<doc_id>/`. It holds one JSON art
 Pydantic models live in `docparse/schemas.py`. Artifacts are written atomically with `ocr_bench.jsonl`.
 
 ### D3. Model roles and serving
-| Role | Model | Where |
-|---|---|---|
-| Layout and first reading | PaddleOCR-VL-1.6 pipeline (default); dots.ocr `prompt_layout_all_en` (alternative) | existing `paddle_pipeline` and vLLM services |
-| Classify; verifier crop reads | Qwen3-VL-8B-Instruct | new vLLM service `qwen3vl` |
-| Verifier field lookup; extraction agent | Qwen3-8B (tool calling, thinking off) | new vLLM service `qwen3` |
-| Text-line detection | PP-OCRv5 DB detector | in-process, GPU if available |
-| Line reading | `paddle_crop` or Thai TrOCR (muocr checkpoint) | pipeline service, or in-process (PyTorch; ONNX optional) |
+| Role (`pipeline.yaml`) | Used for | Default registry entry → model | Where |
+|---|---|---|---|
+| `layout` | Layout and first reading | `paddleocr_vl` → PaddleOCR-VL-1.6 pipeline; alternative `dotsocr` → dots.ocr `prompt_layout_all_en` | existing `paddle_pipeline` and vLLM services |
+| `classifier` | Classify | `qwen3vl` → Qwen3-VL-8B-Instruct | new vLLM service `qwen3vl` |
+| `verifier_reader` | Verifier crop reads; the third reading in D8 | `qwen3vl` | the same service |
+| `llm` | Verifier field lookup; extraction agent | `qwen3` → Qwen3-8B (tool calling, thinking off) | new vLLM service `qwen3` |
+| (none) | Text-line detection | PP-OCRv5 DB detector, not in the registry | in-process, GPU if available |
+| `line_reader` (D7) | Line reading | `paddle_crop` (through the `paddleocr_vl` pipeline) or Thai TrOCR (a checkpoint path, not in the registry) | pipeline service, or in-process (PyTorch; ONNX optional) |
+
+**Binding to the model registry.** `pipeline.yaml` names a registry entry for each role:
+
+```yaml
+roles:
+  layout: paddleocr_vl
+  classifier: qwen3vl
+  verifier_reader: qwen3vl
+  llm: qwen3
+line_reader: paddle_crop
+```
+
+- Each role names an `ocr_bench` registry entry (`configs/models/<name>.yaml`), built with `build_model` the same way the harness builds a model. Switching a role's model is a config edit, plus a new YAML for a model not yet in the registry. Only a new `layout` model needs code: a layout adapter that produces the D5 block schema.
+- Prompts are model-specific, so each role's prompts, sampling and chat-template settings live in the entry's `roles.<role>` section, each with a version. Examples: `roles.classifier.prompt` with a `{classes}` placeholder, and `roles.llm.sampling.chat_template_kwargs: {enable_thinking: false}`.
+- `ModelConfig` changes in a backward-compatible way. It gains an optional `roles` section. `plans` becomes optional, and the harness refuses to run an entry that has none. `Sampling` gains `chat_template_kwargs`, sent through `extra_body`. `VllmClient` gains a chat call for text-only messages and tool definitions.
+- Startup validation refuses a missing entry, a missing `roles.<role>` section, or a `layout` model without an adapter. Artifacts record the model name, `served_model_name`, role prompt version and vLLM version. The resolved entry is part of the stage config hash (D2), so a swap re-runs only the stages that use that role and the stages downstream of them.
+- TrOCR and the detector load weights in-process, and the registry is HTTP-only (model-inference spec), so they stay out of it.
 
 The OCR VLMs are fixed-prompt models and cannot classify or answer focused prompts, hence the separate instruction-following VLM. All three vLLM servers share the H100 at `gpu-memory-utilization` 0.25 / 0.30 / 0.25. TrOCR and the detector use what is left.
 
 *Alternative:* prompting typhoon-ocr1.5 for classification. Rejected because of the measured non-JSON rate.
+*Alternative:* a docparse-only model config. Rejected: one served model would be described in two places, and the harness could not benchmark the role models.
 
 ### D4. Classification
-Qwen3-VL receives the first two pages at 1024 px on the long side, plus the registry's class ids and descriptions. It returns JSON: `{class, confidence, bank}`. When a document has two pages, both are sent in one request. Output that fails the JSON schema or names an unknown class becomes `unknown` with `invalid_reply`.
+The `classifier` model (Qwen3-VL by default) receives the first two pages at 1024 px on the long side, plus the registry's class ids and descriptions. It returns JSON: `{class, confidence, bank}`. When a document has two pages, both are sent in one request. Output that fails the JSON schema or names an unknown class becomes `unknown` with `invalid_reply`.
 
 The confidence is the model's self-report. It is not used for any decision except `unknown` below a configured floor (0.5).
 
@@ -126,7 +145,7 @@ Block ids are `p{page}-b{order}`.
 2. Align the reader text and the block span with Levenshtein editops, and group them into agreed and disputed spans.
 3. For each disputed span, apply these tie-breakers in order:
    - the field-type validator, when the segment belongs to a typed field or column (`amount`, `date`, `account`, via the mapper's column roles);
-   - a third reading of that segment only: `paddle_crop` if the reader was TrOCR, TrOCR if a checkpoint exists, otherwise a Qwen3-VL crop read. The 2-of-3 exact match wins;
+   - a third reading of that segment only: `paddle_crop` if the reader was TrOCR, TrOCR if a checkpoint exists, otherwise a crop read by the `verifier_reader` model. The 2-of-3 exact match wins;
    - otherwise keep the line-reader text, with `data-disputed` set and `data-alt` holding the other readings.
 4. `data-conf` is the minimum over the segment's characters of each source's **isotonically calibrated** P(char correct). For muocr, the per-character input is its token probability spread over the token's characters (D7). Calibration is fitted per source on the gate's held-out lines, and a source with no calibration gets no `data-conf` for its own contribution. Raw logprobs are never compared across sources.
 
@@ -138,7 +157,7 @@ Block ids are `p{page}-b{order}`.
 ### D9. Verifier
 The field lookup is two-step:
 1. Rules first: label aliases from the registry and mapper, and the value found in the same or the next cell or span.
-2. Then Qwen3-8B, given only the candidate blocks and returning `{block_id, value}`, validated like any tool call.
+2. Then the `llm` model (Qwen3-8B by default), given only the candidate blocks and returning `{block_id, value}`, validated like any tool call.
 
 A field goes to recovery if it is not found, fails a validator, or its `data-conf` is below `min_conf`.
 
@@ -146,7 +165,7 @@ A field goes to recovery if it is not found, fails a validator, or its `data-con
 - Regions, in order: region hint → nearest label block → whole page at 2× resolution.
 - For each region: crop with a 10% margin and upscale to a height of at least 64 px per line, then run the detector.
 - No text means `absent` for that region; move to the next region.
-- Otherwise read the crop twice: Qwen3-VL with a focused prompt naming the field and its format, and the line reader on the detected lines.
+- Otherwise read the crop twice: the `verifier_reader` model with a focused prompt naming the field and its format, and the line reader on the detected lines.
 - Accept the value only if both readings agree after `normalize_field` and the validators pass.
 - Then patch by block id, keeping `data-prev`, and set `data-src="verify"`.
 - Re-run the cross-field validators, which is Check B for statements. Revert the patch if they now fail.
@@ -157,7 +176,7 @@ A field goes to recovery if it is not found, fails a validator, or its `data-con
 - The audit (crops, prompts, replies, decisions) goes to `verify.json` and `crops/`.
 
 ### D10. Extraction harness
-Qwen3-8B via the vLLM OpenAI tool-calling API, temperature 0.
+The `llm` model (Qwen3-8B by default) via the vLLM OpenAI tool-calling API, temperature 0.
 
 **Step 1: route the query.** One LLM call classifies the query as `header_field`, `table_aggregate`, `balance_on_date`, `reconciliation` or `free_form`, and fills that type's parameter schema (e.g. `{field}`; `{filter: {date_from, date_to, description_contains, direction}, agg: sum|count|max|min|list}`).
 
@@ -210,4 +229,4 @@ This is a new package, so nothing needs migrating. The new vLLM services are opt
 
 ## Open Questions
 
-- The exact Qwen3-VL and Qwen3 checkpoints and quantization can be settled when the services are brought up in task 2.1. The model roles and interfaces don't depend on them.
+- The exact Qwen3-VL and Qwen3 checkpoints and quantization can be settled when the services are brought up in task 2.1. They go in the `qwen3vl` and `qwen3` registry entries. The model roles and interfaces don't depend on them.

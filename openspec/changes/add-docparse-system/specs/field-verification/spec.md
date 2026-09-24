@@ -22,7 +22,7 @@ The field report SHALL be derived from the final HTML. It SHALL NOT be kept as s
 
 ### Requirement: Recovery guard
 A value SHALL become `recovered` only if both of these hold:
-- the focused VLM reading of the crop and the line-reader reading of the crop agree after field normalization;
+- the focused reading of the crop by the `verifier_reader` role model and the line-reader reading of the crop agree after field normalization;
 - the field's validators pass.
 
 A candidate from one reader only SHALL leave the field `unverified`, SHALL be recorded in the audit trail, and SHALL NOT be written into the field.

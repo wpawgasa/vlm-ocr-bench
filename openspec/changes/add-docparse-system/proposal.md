@@ -17,6 +17,7 @@ The `ocr_bench` harness is already in place, so docparse can be scored against t
 
 - Add a `docparse` Python package and CLI in this repo. It reuses `ocr_bench`'s vLLM and pipeline clients, layout parsers, Thai normalizers, statement mapper and Check B arithmetic.
 - **Document registry**: YAML document classes with required fields, label aliases, region hints, validators and per-bank `required_when` rules. v1 fully specifies `bank_statement` only; other classes can be added through config.
+- **Model roles**: every model docparse calls over HTTP is bound by role (`layout`, `classifier`, `verifier_reader`, `llm`) to an entry of the `ocr_bench` model registry (`configs/models/*.yaml`). A role's model is switched in configuration. The defaults are PaddleOCR-VL, Qwen3-VL-8B and Qwen3-8B.
 - **Parsing pipeline**, where each stage writes a typed artifact:
   1. **Classify**: an instruction-following VLM assigns a registry class.
   2. **Layout**: layout blocks with bbox, category, reading order and a first text reading. The PaddleOCR-VL pipeline is the default and dots.ocr `prompt_layout_all_en` the alternative.
@@ -59,7 +60,7 @@ Non-goals:
 - `parse-reconciliation`: merging readings by alignment voting and the parsed-HTML output contract.
 - `field-verification`: the verifier agent loop, field states, recovery guards, budgets and the audit trail.
 - `query-extraction`: the extraction agent harness, its tools, query-type plans, provenance, verification and abstention.
-- `docparse-service`: the CLI, the HTTP API, the per-document artifact layout and error semantics.
+- `docparse-service`: the CLI, the HTTP API, the binding of model roles to the model registry, the per-document artifact layout and error semantics.
 - `docparse-evaluation`: the frozen eval set, docparse as an `ocr_bench` model, the statement Q/A set and the success criterion.
 
 ### Modified Capabilities
@@ -73,7 +74,11 @@ Non-goals:
   - `configs/docparse/`: pipeline config and document classes.
   - `tests/docparse/`.
   - `scripts/serve_{qwen3vl,qwen3}.sh`.
-- **ocr_bench**: a `docparse` adapter under `ocr_bench/models/` so the harness can score docparse output. No existing requirement changes.
+- **ocr_bench**:
+  - a `docparse` adapter under `ocr_bench/models/`, so the harness can score docparse output;
+  - a backward-compatible `ModelConfig` extension (an optional `roles` section, optional `plans`, `chat_template_kwargs` in `Sampling`) and a text-only/tool chat call in `VllmClient`;
+  - registry entries `configs/models/qwen3vl.yaml` and `qwen3.yaml`.
+  Every existing model YAML still loads, and no harness requirement changes.
 - **Serving**: two new vLLM services, Qwen3-VL-8B-Instruct (classify, verifier crop reads) and Qwen3-8B (field lookup, extraction), alongside the PaddleOCR-VL pipeline. They all share one H100 at reduced `gpu-memory-utilization`. TrOCR and the PP-OCRv5 text detector run in-process.
 - **Dependencies**:
   - `transformers`, `torch`, `paddleocr` (detector only), `fastapi`, `uvicorn`.

@@ -14,15 +14,16 @@ The implementer tier follows the model-routing skill:
 
 ## 2. D1 Scaffold, registry and serving
 
-- [ ] 2.1 [Sonnet] Add the vLLM services `qwen3vl` (Qwen3-VL-8B-Instruct) and `qwen3` (Qwen3-8B, tool calling), with `scripts/serve_{qwen3vl,qwen3}.sh` and a `docparse` compose profile at the D3 memory fractions. Record the chosen checkpoints in design D3. Verify both health checks pass on the H100, with the Paddle pipeline running at the same time.
+- [ ] 2.1 [Sonnet] Add the vLLM services `qwen3vl` (Qwen3-VL-8B-Instruct) and `qwen3` (Qwen3-8B, tool calling), with `scripts/serve_{qwen3vl,qwen3}.sh` and a `docparse` compose profile at the D3 memory fractions. Write their registry entries `configs/models/qwen3vl.yaml` and `qwen3.yaml` (roles only, no benchmark plans). Record the chosen checkpoints in design D3. Verify both health checks pass on the H100, with the Paddle pipeline running at the same time.
 - [ ] 2.2 [Sonnet] Create the `docparse/` package skeleton, `docparse/schemas.py` (all stage artifacts from D2), `configs/docparse/pipeline.yaml`, `tests/docparse/`, and the dependencies in `pyproject.toml`. Verify `uv sync --all-extras` and JSON round-trip tests for every schema.
 - [ ] 2.3 [Sonnet] Implement `docparse/artifacts.py`: the doc id (a hash of the file content), per-stage config and input hashes, skip-if-unchanged, and atomic writes. Verify tests showing that a second run skips the stage and that a config change re-runs only that stage and the stages downstream of it.
 - [ ] 2.4 [Sonnet] Implement `docparse/registry.py` and `configs/docparse/classes/bank_statement.yaml`. The field schema, validators and `required_when` come from the `document-registry` spec. Aliases are imported from `ocr_bench/normalize/statement.py`, and bank rules reuse `BankOverrides`. Verify the spec scenarios (valid load, bad type, new class, KBank opening balance, shared alias).
+- [ ] 2.5 [Sonnet] Bind model roles to the model registry per design D3. Extend `ModelConfig` with an optional `roles` section and optional `plans` (the harness refuses an entry without plans), add `chat_template_kwargs` to `Sampling`, and add a text-only/tool chat call to `VllmClient`. Add the `roles` loader in `docparse/`, with startup validation and the model identity recorded in artifacts. Verify both "Model roles bound to the model registry" scenarios, that every existing `configs/models/*.yaml` still loads, and that `ocrbench infer` rejects a roles-only entry.
 
 ## 3. D2 Parse skeleton (no TrOCR yet)
 
-- [ ] 3.1 [Sonnet] Implement `docparse/classify.py` per design D4. Verify the spec scenarios with recorded Qwen3-VL replies (statement, `unknown`, prose reply → `invalid_reply`, bank detection).
-- [ ] 3.2 [Sonnet] Implement `docparse/layout.py` with the Paddle and dots backends, reusing the `paddle_layout` and `dots_layout_json` parsers, and add the `truncated` flag and page-level errors. Verify recorded-response tests for both backends, a `finish_reason=length` page and a failed page (→ `partial`).
+- [ ] 3.1 [Sonnet] Implement `docparse/classify.py` per design D4. Verify the spec scenarios with recorded replies from the `classifier` model (Qwen3-VL) (statement, `unknown`, prose reply → `invalid_reply`, bank detection).
+- [ ] 3.2 [Sonnet] Implement `docparse/layout.py` with the `paddleocr_vl` and `dotsocr` layout adapters, selected by `roles.layout`, reusing the `paddle_layout` and `dots_layout_json` parsers, and add the `truncated` flag and page-level errors. Verify recorded-response tests for both backends, a `finish_reason=length` page and a failed page (→ `partial`).
 - [ ] 3.3 [Opus] Implement `docparse/segment.py` per design D6: the DB detector, table cell assignment from table HTML, aspect-ratio splitting and the projection fallback. Verify on synthetic rendered fixtures: the paragraph, table, 1500×30 line and faint-print scenarios.
 - [ ] 3.4 [Sonnet] Implement `docparse/recognize/base.py` (the `LineReader` protocol) and `paddle_crop.py`, batched, with per-segment errors. Verify the spec scenarios with recorded pipeline replies.
 - [ ] 3.5 [Opus] Implement `docparse/reconcile.py` per design D8: span location, editops voting, validator tie-break, third-reader call and `data-alt`/`data-disputed`. Add `docparse/html.py`, which renders deterministic HTML. Verify every `parse-reconciliation` scenario, plus a byte-identical HTML test.
@@ -40,14 +41,14 @@ The implementer tier follows the model-routing skill:
 
 ## 5. D4 Verifier
 
-- [ ] 5.1 [Opus] Implement the field lookup in `docparse/verify.py` per design D9 (rules, then Qwen3-8B on the candidate blocks), with the field report derived from the HTML. Verify the complete-statement scenario and the `not_required` field state.
-- [ ] 5.2 [Opus] Implement the recovery loop: the region ladder, the detector-based `absent` check, the two-reader agreement guard, validator gating, patching by block id with `data-prev`, cross-field re-validation with revert, both budgets, and the audit trail. Verify every `field-verification` scenario with recorded replies.
+- [ ] 5.1 [Opus] Implement the field lookup in `docparse/verify.py` per design D9 (rules, then the `llm` model on the candidate blocks), with the field report derived from the HTML. Verify the complete-statement scenario and the `not_required` field state.
+- [ ] 5.2 [Opus] Implement the recovery loop: the region ladder, the detector-based `absent` check, the two-reader agreement guard (the `verifier_reader` model and the line reader), validator gating, patching by block id with `data-prev`, cross-field re-validation with revert, both budgets, and the audit trail. Verify every `field-verification` scenario with recorded replies.
 - [ ] 5.3 [Sonnet] Wire the verify stage into `docparse parse` and `status.json`, so a document is `complete` or `partial` depending on its field states. Verify re-running verify alone without calling the upstream stages again.
 
 ## 6. D5 Extraction
 
 - [ ] 6.1 [Opus] Implement `docparse/extract/tools.py`: the typed parse view (DOM, `fields.json` and `StatementRow`s with row and block ids) and all seven tools, with a `Decimal` AST in `compute`. Verify unit tests for each tool, including invalid arguments returning an error result.
-- [ ] 6.2 [Opus] Implement `docparse/extract/plans.py` and `agent.py`: query routing with parameter schemas, the templates for the four query types, and a bounded free-form ReAct loop with the flag. Verify recorded-reply tests for each query type and the unsupported-phrasing scenario.
+- [ ] 6.2 [Opus] Implement `docparse/extract/plans.py` and `agent.py`: query routing through the `llm` model with parameter schemas, the templates for the four query types, and a bounded free-form ReAct loop with the flag. Verify recorded-reply tests for each query type and the unsupported-phrasing scenario.
 - [ ] 6.3 [Opus] Implement `docparse/extract/verify.py`: read-value matching, recomputation of computed values, step retries and `absent` propagation. Verify the hallucinated-citation and unanswerable scenarios.
 - [ ] 6.4 [Sonnet] Wire `docparse extract` to write the answer JSON with its plan and trace. Verify a CLI test on a fixture parse.
 

@@ -22,11 +22,11 @@ A backend mode that returns boxes without text SHALL NOT be used.
 - **THEN** every block has a bbox, a category, an order index, and non-empty text or table HTML, unless the block is a figure
 
 ### Requirement: Pluggable layout backends
-The system SHALL support selecting the layout backend in configuration. The PaddleOCR-VL pipeline SHALL be the default and dots.ocr full layout the alternative. Both SHALL produce the same block schema.
+The layout backend SHALL be the model bound to the `layout` role (docparse-service, "Model roles bound to the model registry"). `paddleocr_vl` (the PaddleOCR-VL pipeline) SHALL be the default and `dotsocr` (dots.ocr full layout) the alternative. Only a registry model with a docparse layout adapter SHALL be accepted for this role. Every adapter SHALL produce the same block schema.
 
 #### Scenario: Switching backend
-- **WHEN** the configuration selects the dots.ocr backend
-- **THEN** the layout artifact has the same schema, and records `backend: dotsocr` with its prompt version
+- **WHEN** `roles.layout` is set to `dotsocr`
+- **THEN** the layout artifact has the same schema, and records `model: dotsocr` with its prompt version
 
 ### Requirement: Truncated backend output
 When the backend reply was truncated at the token limit, the system SHALL mark the affected page's block text `truncated`. Reconciliation SHALL treat truncated text as absent. The blocks' boxes SHALL be kept.

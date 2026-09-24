@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Answers a natural-language query over a parsed document with a small LLM, returning values with provenance that have been verified against the parse, or an explicit abstention.
+Answers a natural-language query over a parsed document with the small LLM bound to the `llm` role, returning values with provenance that have been verified against the parse, or an explicit abstention.
 
 ## ADDED Requirements
 
@@ -12,7 +12,7 @@ The extractor SHALL accept a query string and a parsed-document id. It SHALL ret
 - for each value, its provenance (block ids, page, bbox and, for tables, row ids);
 - a status: `verified`, `unverified` or `absent`;
 - the plan that was executed;
-- a trace of tool calls.
+- a trace of tool calls, naming the `llm` role model.
 
 #### Scenario: Header field query
 - **WHEN** the query is "What is the closing balance?" on a parsed statement
