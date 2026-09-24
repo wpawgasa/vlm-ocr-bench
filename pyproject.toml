@@ -34,6 +34,9 @@ dependencies = [
   "zss>=1.2.0",
   "pikepdf>=9",
   "fonttools>=4.50",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +50,7 @@ dev = [
 ocrbench = "ocr_bench.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["ocr_bench"]
+packages = ["ocr_bench", "docparse"]
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,30 @@
+# docparse pipeline configuration (OpenSpec add-docparse-system, design D2-D11).
+# Each role names an entry of the ocr_bench model registry (configs/models/<name>.yaml, design D3);
+# binding and validating them is task 2.5.
+roles:
+  layout: paddleocr_vl
+  classifier: qwen3vl
+  verifier_reader: qwen3vl
+  llm: qwen3
+line_reader: paddle_crop          # paddle_crop | trocr; trocr only after passing the gate (task 4.4)
+classes_dir: configs/docparse/classes
+artifacts_root: runs/docparse
+classify:
+  max_pages: 2
+  long_side_px: 1024
+  min_confidence: 0.5             # below this the class is "unknown" (D4)
+segment:
+  max_aspect: null                # null: the active reader's input ratio (6 muocr, 10 paddle_crop)
+trocr:
+  checkpoint: models/muocr-base-26m-stage2-finetuned-20240820-v1
+  version: null                   # content hash, recorded in task 4.1
+verify:
+  max_retries: 3
+  max_vlm_calls: 12
+  min_conf: 0.9                   # calibrated P(char correct); revisit after task 4.3
+extract:
+  max_step_retries: 2
+  free_form_max_tool_calls: 8
+service:
+  max_upload_mb: 50
+  page_concurrency: 4
