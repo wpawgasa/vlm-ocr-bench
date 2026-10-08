@@ -17,7 +17,7 @@ segment:
   max_aspect: null                # null: the active reader's input ratio (6 muocr, 10 paddle_crop)
 trocr:
   checkpoint: models/muocr-base-26m-stage2-finetuned-20240820-v1
-  version: null                   # content hash, recorded in task 4.1
+  version: 77f0fb0d6f37c7f3aef4d55186dc3197.dir  # DVC md5 of the checkpoint dir (models.dvc, task 4.1)
 verify:
   max_retries: 3
   max_vlm_calls: 12
