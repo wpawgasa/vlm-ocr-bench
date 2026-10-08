@@ -116,7 +116,7 @@ Per-host settings go in `.devcontainer/.env` (gitignored, see `.env.example`): `
 ```bash
 cp /secure/path/looloo-ocr-<id>.json .            # the DVC service-account key, gitignored
 uv run dvc remote modify --local gcs credentialpath "$PWD/looloo-ocr-<id>.json"
-uv run dvc pull        # ~7.3 GB: data/statements + the prepared run data/runs/2026-09-22-a
+uv run dvc pull        # ~10.4 GB: data/statements, the prepared run data/runs/2026-09-22-a and models/ (the 3.1 GB muocr checkpoint)
 uv run dvc status      # expect "Data and pipelines are up to date" — do NOT re-run prepare
 ```
 
