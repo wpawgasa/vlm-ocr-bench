@@ -126,13 +126,26 @@ Block ids are `p{page}-b{order}`.
 - a 62,312-token Thai+English SentencePiece vocabulary (`source.spm`/`target.spm`, `vocab.json`);
 - an ONNX export (encoder, decoder, decoder-with-past).
 
-*Why not the from-scratch character-level decoder from the first draft:* the checkpoint already reads Thai. Its own held-out results report mean CER 0.9% on PDF lines, 1.2% on scanned and 0.9% on camera. Those results are on forms, not statements; the per-row files were deleted because they contained personal data. So from-scratch training would spend GPU time to reach where muocr already is. What we do not know is how it reads **statement** lines, which Spike A and the gate measure.
+*Why not the from-scratch character-level decoder from the first draft:* the checkpoint already reads Thai. Its own held-out results report mean CER 0.9% on PDF lines, 1.2% on scanned and 0.9% on camera. Those results are on forms, not statements; the per-row files were deleted because they contained personal data. So from-scratch training would spend GPU time to reach where muocr already is. What we did not know was how it reads **statement** lines.
+
+**Spike A (task 1.1, `runs/docparse/spikes/line_readers.json`, note `docs/docparse/spike-a-line-readers.md`).** Mean CER per line in %, clean / scan_low / photo, on the same 17,064 crops (5,528 statement segments and 160 ThaiOCRBench Fine-grained lines per condition):
+
+| Reader | Statement lines | Numeric statement lines | ThaiOCRBench Fine-grained |
+|---|---|---|---|
+| `paddle_crop` | 4.34 / 11.17 / 5.97 | **0.07 / 0.29 / 0.07** | 36.36 / 55.03 / 45.99 |
+| typhoon crop read | 5.58 / 6.59 / 6.82 | 0.76 / 1.44 / 1.43 | **12.78 / 21.97 / 15.66** |
+| dots.ocr grounding | 40.75 / 41.96 / 46.33 | 34.10 / 32.67 / 38.68 | 45.23 / 50.10 / 50.54 |
+| muocr, own resize, `no_repeat_ngram_size` 0 | **2.10 / 3.93 / 2.52** | 0.16 / 0.39 / 0.17 | 18.14 / 25.84 / 20.22 |
+| muocr, own resize, `no_repeat_ngram_size` 3 | 2.11 / 3.94 / 2.53 | 0.16 / 0.39 / 0.17 | 18.14 / 25.84 / 20.22 |
+| muocr, pad to 384, `no_repeat_ngram_size` 0 | 4.31 / 4.17 / 4.07 | 2.07 / 0.84 / 0.94 | 21.16 / 26.64 / 22.35 |
+
+So muocr is the best statement reader in every condition, and the TrOCR branch is worth pursuing. Pooled over characters, its clean statement CER is 0.85%. 4,799 of the 5,528 statement segments are KBank. ThaiOCRBench Text recognition was left out: its samples are whole images with a question, not lines.
 
 **Inference**
-- Resize crops keeping aspect ratio to height 64, then pad right to 384 with the background colour. Segments are pre-split to at most 6:1 (D6), so nothing is squashed.
-- Decoding: beam 4, `max_new_tokens` 120 and **`no_repeat_ngram_size: 0`**. The checkpoint's default of 3 blocks repeated token trigrams, which corrupts amounts such as `1,000,000.00` and account numbers with repeated digits. Its own number set showed 40% exact match despite a 6% mean CER. Spike A measures numeric lines with both settings, and the setting is recorded in the reader version.
+- Resize crops straight to 64×384, as the checkpoint's own `ViTImageProcessor` does. Segments are pre-split to at most 6:1 (D6), which bounds the distortion. *Revised after Spike A:* the first draft kept the aspect ratio and padded right to 384, but on short crops muocr then writes a currency sign or `น.` into the blank margin. Padding cost 2.2 points of clean CER (4.31% against 2.10%) and helped only between 4:1 and 6:1 (0.60% against 0.74%).
+- Decoding: beam 4, `max_new_tokens` 120 and **`no_repeat_ngram_size: 0`**. The checkpoint's default of 3 blocks repeated token trigrams, which corrupts amounts such as `1,000,000.00` and account numbers with repeated digits. Its own number set showed 40% exact match despite a 6% mean CER. The setting is recorded in the reader version. In Spike A only 39 of 17,064 lines read differently between 3 and 0: 0 was better on 33 and 3 on 3 (typically 3 drops the last digit of a date range). Statement segments rarely repeat a 3-token sequence, so the effect on numeric lines is small there (3 lines), but 0 costs nothing.
 - Confidence: each generated token's probability, taken from the beam's final scores, is assigned to every character that token decodes to. This gives the per-character confidences D8 calibrates.
-- Runtime: PyTorch on GPU in batches by default. The ONNX export is an optional CPU path for the service, and must reproduce the PyTorch text on the gate lines.
+- Runtime: PyTorch on GPU in batches by default. Spike A measured about 230 segments per second (1.3 s per 300) on the H100 in fp32 with beam 4, batch 64–256, alone on the GPU. The ONNX export is an optional CPU path for the service, and must reproduce the PyTorch text on the gate lines.
 
 **Conditional fine-tune (only if muocr fails the gate, task 4.4)**
 - Start from muocr and keep its tokenizer.
@@ -140,7 +153,7 @@ Block ids are `p{page}-b{order}`.
 - Training: a low learning rate (1e-5 to 3e-5) with AdamW and cosine decay, in bf16 on the H100. Held out: 5% of the synthetic data, plus real lines from files used neither for training nor for eval.
 - The fine-tuned checkpoint must pass the same gate.
 
-**Gate (spec line-recognition):** clean CER ≤ 2%, degraded CER ≤ 6%, and no worse than `paddle_crop` on the same lines. The relative condition is the one that matters, because otherwise the TrOCR branch adds latency without gain.
+**Gate (spec line-recognition):** clean CER ≤ 2%, degraded CER ≤ 6%, and no worse than `paddle_crop` on the same lines. The relative condition is the one that matters, because otherwise the TrOCR branch adds latency without gain. On the Spike A lines muocr meets the relative condition and the degraded threshold, but its per-line mean clean CER (2.10%) is just over 2% while its pooled CER is 0.85%; task 4.3 must fix which average the gate uses.
 
 ### D8. Reconciliation by alignment voting
 1. For each segment, find its span in the block text: fuzzy-locate the reader text in the block text with `rapidfuzz` partial alignment, in reading order, and consume matched spans.
@@ -201,7 +214,7 @@ The `llm` model (Qwen3-8B by default) via the vLLM OpenAI tool-calling API, temp
 |---|---|
 | Layout | 2–6 s (4 pipeline replicas) |
 | Detection | ≈0.1 s |
-| Line reading | muocr 2–4 s for about 300 segments batched with beam 4 (to be measured in Spike A); `paddle_crop` 3–8 s |
+| Line reading | muocr about 1.3 s for 300 segments batched with beam 4 (measured in Spike A); `paddle_crop` 3–8 s |
 | Classify | 1 call per document |
 
 The happy path totals about 10–20 s per page. The verifier's worst case is 12 VLM calls per document. Extraction takes 2–4 LLM calls for template queries and at most 8 tool calls for free-form ones.
