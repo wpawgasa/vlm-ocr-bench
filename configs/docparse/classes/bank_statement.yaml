@@ -1,0 +1,52 @@
+# The bank statement class (OpenSpec add-docparse-system, document-registry spec).
+# Aliases come from the ocr_bench statement mapper (aliases_from), never copied here.
+id: bank_statement
+description: >-
+  A bank account statement: the account holder, account number and statement period,
+  opening and closing balances, and a table of dated transactions with withdrawal and
+  deposit amounts and a running balance.
+banks_from: ../../datasets/bankstmt.yaml # bank list and BankOverrides, relative to this file
+cross_validators: [running_balance]
+fields:
+  - name: bank
+    type: text
+    validators: [known_bank] # detected by the classifier, no label
+  - name: account_no
+    type: account
+    aliases_from: header:account_no
+    validators: [account_number]
+    region_hint: {page: first, box: [0.0, 0.0, 1.0, 0.35]}
+  - name: account_name
+    type: text
+    aliases_from: header:account_name
+    validators: [non_empty]
+    region_hint: {page: first, box: [0.0, 0.0, 1.0, 0.35]}
+  - name: period_start
+    type: date
+    aliases_from: header:period
+    validators: [date]
+    region_hint: {page: first, box: [0.0, 0.0, 1.0, 0.35]}
+  - name: period_end
+    type: date
+    aliases_from: header:period
+    validators: [date]
+    region_hint: {page: first, box: [0.0, 0.0, 1.0, 0.35]}
+  - name: opening_balance
+    type: amount
+    aliases_from: header:opening_balance
+    validators: [amount]
+    required_when: {bank_not_in: [kbank]} # KBank statements print no opening balance
+    region_hint: {page: first, box: [0.0, 0.0, 1.0, 0.5]}
+  - name: closing_balance
+    type: amount
+    aliases_from: header:closing_balance
+    validators: [amount]
+    region_hint: {page: last, box: [0.0, 0.0, 1.0, 1.0]}
+  - name: transactions
+    type: table
+    columns:
+      date: column:date
+      description: column:description
+      debit: column:withdrawal
+      credit: column:deposit
+      balance: column:balance
