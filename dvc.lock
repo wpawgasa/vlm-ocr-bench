@@ -19,9 +19,9 @@ stages:
       nfiles: 31
     - path: ocr_bench/data
       hash: md5
-      md5: 682b4a261c2c36e676df09133d12e731.dir
-      size: 31014
-      nfiles: 6
+      md5: 9b4a67fbb9cafd8fd5b15c06f9ef2055.dir
+      size: 38718
+      nfiles: 7
     outs:
     - path: data/runs/2026-09-22-a/config.resolved.yaml
       hash: md5
@@ -29,9 +29,9 @@ stages:
       size: 2182
     - path: data/runs/2026-09-22-a/gt
       hash: md5
-      md5: 64a6fa9b902122f5e1d702da829e5fef.dir
-      size: 6289243
-      nfiles: 1878
+      md5: f34e2d4f4eebab3dabc6ee9084369b32.dir
+      size: 10710118
+      nfiles: 2018
     - path: data/runs/2026-09-22-a/img
       hash: md5
       md5: 5c0983e08d1bbdea383ff8c1e903d078.dir
@@ -39,9 +39,9 @@ stages:
       nfiles: 6846
     - path: data/runs/2026-09-22-a/manifest.jsonl
       hash: md5
-      md5: e3a31a572253a313c03df4396414e9fe
-      size: 4967676
+      md5: 39a815cc2df7f7a3fe6996e6dcc57991
+      size: 4973712
     - path: data/runs/2026-09-22-a/prepare_summary.json
       hash: md5
-      md5: f110b22b2293c2e4efb7b06ec91ac774
-      size: 1556
+      md5: 3b9b4ebb103d98fc6ffeb8bcdba7c3aa
+      size: 1471

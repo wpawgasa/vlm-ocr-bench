@@ -95,9 +95,12 @@ far as it can go. The GPU steps are batched into one H100 session, ideally after
 3. **Record real Qwen3-VL and Qwen3 replies** as test fixtures for tasks 3.1, 5.x and 6.x
    (`tests/fixtures/responses/`, the harness convention). Never record replies that contain
    client statement content; the repo is public. Use synthetic or ThaiOCRBench pages.
-4. **Re-run `prepare`** for run `2026-09-22-a` so that the text-layer ground truth includes the
-   70 repaired KTB pages (27 → 97 usable digital pages, `docs/docparse/spike-b-text-layers.md`).
-   Task 1.3 (the frozen eval list) depends on it, and on the manual anchor set (task 1.4).
+4. ~~**Re-run `prepare`**~~ **Done 2026-10-09 on the V100 box** (CPU only, `dvc repro prepare`
+   with `HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1` so the cached ThaiOCRBench snapshot was reused).
+   The text-layer ground truth now includes the 70 repaired KTB pages (27 → 97 usable digital
+   pages, `docs/docparse/spike-b-text-layers.md`). Only the 210 KTB manifest rows' `gt_kind`/`gt_path`
+   changed; `img` is byte-identical, so existing predictions still apply. Re-run `score` to pick
+   up the new ground truth.
 
 ## 1. Set the host up
 
@@ -122,6 +125,8 @@ uv run dvc status      # expect "Data and pipelines are up to date" — do NOT r
 
 The prepared run is **`2026-09-22-a`**: 2,282 samples and 6,846 manifest rows (1,824
 ThaiOCRBench + 458 statement pages, each under `clean`, `scan_low` and `photo`).
+97 digital statement pages have text-layer ground truth (rebuilt 2026-10-09; 33 Krungsri pages
+are unmappable).
 
 ## 2. Start the model servers (H100, bf16)
 
