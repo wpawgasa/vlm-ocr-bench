@@ -1,0 +1,12 @@
+# Frozen docparse eval file list (OpenSpec add-docparse-system, task 1.3, design D12).
+# File ids only, never statement content. Frozen before any docparse tuning: changing
+# the list means a new file eval_files.v<N+1>.yaml, never an edit to this one.
+version: 1
+text_layer:  # every file with >=1 usable text-layer page after Spike B (docs/docparse/spike-b-text-layers.md)
+  - {file: bbl-en-01, harness_id: BS-bbl-0001, bank: bbl}
+  - {file: kbank-en-01, harness_id: BS-kbank-0001, bank: kbank}
+  - {file: kbank-th-06, harness_id: BS-kbank-0007, bank: kbank}
+  - {file: ktb-en-03, harness_id: BS-ktb-0003, bank: ktb}
+  - {file: ktb-th-01, harness_id: BS-ktb-0004, bank: ktb}
+  - {file: ttb-en-01, harness_id: BS-ttb-0001, bank: ttb}
+anchor: []  # manual anchor set (task 1.4); not labelled yet, its files go into v2
