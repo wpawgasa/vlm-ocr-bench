@@ -10,7 +10,7 @@ from decimal import Decimal
 import pytest
 
 from ocr_bench.config import BankOverrides
-from ocr_bench.normalize.statement import map_statement_page, merge_file
+from ocr_bench.normalize.statement import map_statement_page, merge_file, parse_date, role_for
 from ocr_bench.schemas import Block, BlockType, NormalizedPage
 
 # --- synthetic pages -------------------------------------------------------------------------
@@ -303,3 +303,79 @@ def test_header_value_line_with_its_own_label_is_not_consumed():
         ["ชื่อบัญชี", "ซ.ลาซาล ต.บางนา จ.กทม. 10260 เลขที่บัญชีเงินฝาก 050-8-64757-3"]
     )
     assert found["account_no"] == "050-8-64757-3"
+
+
+# --- date cells carrying a time -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("cell", "expected"),
+    [
+        ("26/07/23 10:30", "2023-07-26"),
+        ("26/07/23\n10:30", "2023-07-26"),
+        ("26/07/23\\n10:30", "2023-07-26"),  # a literal backslash-n left in the model output
+        ("26/07/2310:30", "2023-07-26"),  # date and time read with no separator
+        ("26/07/256610:30", "2023-07-26"),
+        ("26-07-23 10:30", "2023-07-26"),
+        ("26/07/2023 10:30:00", "2023-07-26"),
+        ("26/07/23 10.30", "2023-07-26"),
+    ],
+)
+def test_date_cell_with_a_trailing_time_parses_the_date(cell, expected):
+    assert parse_date(cell) == expected
+
+
+@pytest.mark.parametrize("cell", ["10:30", "26/07/23 Transfer", "2610:30"])
+def test_a_time_alone_or_a_date_with_other_text_is_not_a_date(cell):
+    assert parse_date(cell) is None
+
+
+def test_rows_whose_date_cell_carries_a_time_are_kept():
+    table = [
+        ["Date/Time", "Description", "Withdrawal", "Deposit", "Balance"],
+        ["01/03/24 09:42", "Cash Withdrawal", "200.00", "", "300.00"],
+        ["04/03/2410:15", "Transfer Deposit", "", "1,000.00", "1,300.00"],
+    ]
+    mapped = map_statement_page(_page([table]), bank="ktb", page_no=1, overrides=None)
+    assert [r.date for r in mapped.rows] == ["2024-03-01", "2024-03-04"]
+
+
+# --- column roles -------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("cell", "role"),
+    [
+        ("รายการถอน", "withdrawal"),  # KTB's Thai header: "รายการ" (description) is a prefix
+        ("รายการฝาก", "deposit"),
+        ("รายการ", "description"),
+        ("วันที่/เวลา", "date"),
+        ("Time/ Eff.Date", "time"),
+    ],
+)
+def test_column_role_prefers_the_longer_keyword_at_the_same_position(cell, role):
+    assert role_for(cell) == role
+
+
+def test_thai_withdrawal_and_deposit_columns_keep_their_amounts():
+    table = [
+        ["วันที่/เวลา", "รายการ", "รายการถอน", "รายการฝาก", "ยอดเงินคงเหลือ"],
+        ["01/03/24 09:42", "ถอนเงินสด", "200.00", "", "300.00"],
+        ["04/03/24 10:15", "รับโอน", "", "1,000.00", "1,300.00"],
+    ]
+    mapped = map_statement_page(_page([table]), bank="ktb", page_no=1, overrides=None)
+    assert [(r.debit, r.credit) for r in mapped.rows] == [
+        (Decimal("200.00"), None),
+        (None, Decimal("1000.00")),
+    ]
+
+
+@pytest.mark.parametrize("value", ["123-4-56789-0", "XXX-X-XX446-5", "1234567890", "123 4 56789 0"])
+def test_account_number_shapes_are_accepted(value):
+    assert extract_header_fields(["Account Number", value]) == {"account_no": value}
+
+
+def test_an_address_is_not_an_account_number():
+    # KTB prints no account number beside its label; the next line is the branch address.
+    found = extract_header_fields(["Account Number", "Branch Road 123 Synth District 10260"])
+    assert "account_no" not in found
