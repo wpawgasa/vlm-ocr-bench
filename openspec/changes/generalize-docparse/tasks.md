@@ -66,7 +66,7 @@ Ordering rule: every class's eval list is frozen (group 4) before any task that 
 
 - [ ] 7.1 [Human] H100 session (a): `dvc push` the new corpora, then run the baselines (dots.ocr, typhoon-ocr1.5, PaddleOCR-VL, Qwen3-VL-8B) and docparse on `thaipdf`, the structure sets and the ThaiOCRBench tasks of run `2026-09-22-a`, as one new run id. Verify `ocrbench score` writes rows for every model on every task and the `doc_class_source_condition_model` table is non-empty for all four classes.
 - [ ] 7.2 [Human] H100 session (b): run `docparse gate` with the per-class breakdown on the new text-layer lines; set class `line_reader` overrides only where a class's rows contradict the global decision, and record the reason in design D9. Verify `gate.json` has per-class rows and is committed as numbers only.
-- [ ] 7.3 [Human] Run `docparse eval compare` on the run from 7.1 and write `docs/docparse-generalization.md`: per-class verdicts, the generic verdict, per source and per condition tables, the synthetic table, latency per class, the licence table from `sources.yaml`, and the open questions that remain. Verify the report quotes every eval list version, every number traces to a committed or DVC-tracked artifact, and no client content appears.
+- [ ] 7.3 [Opus] Run `docparse eval compare` on the run from 7.1 and write `docs/docparse-generalization.md`: per-class verdicts, the generic verdict, per source and per condition tables, the synthetic table, latency per class, the licence table from `sources.yaml`, and the open questions that remain. Verify the report quotes every eval list version, every number traces to a committed or DVC-tracked artifact, and no client content appears.
 
 ## 8. Archive housekeeping
 
