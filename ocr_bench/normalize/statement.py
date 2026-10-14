@@ -38,8 +38,8 @@ COLUMN_KEYWORDS: dict[str, tuple[str, ...]] = {
     "date": ("date", "วันที่", "วันทำรายการ"),
     "time": ("time", "เวลา"),
     "description": ("descriptions", "description", "particulars", "รายการ", "รายละเอียด"),
-    "withdrawal": ("withdrawal", "debit", "ถอน", "เดบิต"),
-    "deposit": ("deposit", "credit", "ฝาก", "เครดิต"),
+    "withdrawal": ("withdrawal", "debit", "ถอน", "รายการถอน", "เดบิต"),
+    "deposit": ("deposit", "credit", "ฝาก", "รายการฝาก", "เครดิต"),
     "amount": ("amount", "จำนวนเงิน"),
     "balance": ("balance", "outstanding", "คงเหลือ", "ยอดคงเหลือ"),
     "channel": ("channel", "ช่องทาง"),
@@ -58,19 +58,21 @@ def role_for(text: str) -> str | None:
     A cell naming both withdrawal and deposit (KBank's "Withdrawal / Deposit") is the
     combined role; otherwise the keyword appearing earliest in the cell wins, so a
     bilingual or stacked header such as "Time/ Eff.Date" reads as `time`, not `date`.
+    At the same position the longer keyword wins: KTB's "รายการถอน" is a withdrawal
+    column, not a description ("รายการ").
     """
     t = canonical_text(text).lower()
     if not t:
         return None
-    hits: list[tuple[int, str]] = []
+    hits: list[tuple[int, int, str]] = []
     for role, keywords in COLUMN_KEYWORDS.items():
-        positions = [t.find(k) for k in keywords if k in t]
-        if positions:
-            hits.append((min(positions), role))
+        found = [(t.find(k), -len(k)) for k in keywords if k in t]
+        if found:
+            hits.append((*min(found), role))
     if not hits:
         return None
     hits.sort()
-    roles = [role for _, role in hits]
+    roles = [role for _, _, role in hits]
     if "withdrawal" in roles and "deposit" in roles:
         return WITHDRAWAL_DEPOSIT
     return roles[0]
@@ -163,8 +165,17 @@ def parse_date(text: str | None, date_format: str | None = None) -> str | None:
             pass
     value = normalize_field("date", t)
     if value.value is None or value.flags:
-        return None
+        match = _DATE_TIME_RE.match(t)
+        return parse_date(match.group(1), date_format) if match else None
     return value.value
+
+
+# A numeric date followed by a time in the same cell (KTB, SCB, KBank, Krungsri). The
+# separator may be whitespace, a literal "\n" left in a model's output, or nothing: a
+# 4-digit year is tried first, so "26/07/2310:30" falls back to the 2-digit year "23".
+_DATE_TIME_RE = re.compile(
+    r"^(\d{1,2}[/-]\d{1,2}[/-](?:\d{4}|\d{2}))(?:\s|\\n)*\d{1,2}[:.]\d{2}(?:[:.]\d{2})?$"
+)
 
 
 _OPENING_RE = re.compile(
@@ -291,6 +302,11 @@ _STRONG_FIELDS = frozenset(
 )
 
 
+# Digits, masking characters and separators only: an address with a house number and a
+# postcode has 4 digits too (KTB prints no account number beside its label).
+_ACCOUNT_NO_RE = re.compile(r"[\dXx*][\dXx*\-\s]*")
+
+
 def _valid_value(field: str, value: str) -> bool:
     """Whether `value` can be `field`'s value: never another label, and shaped like the field
     (an account number has at least 4 digits, amounts parse, a period has a digit)."""
@@ -299,7 +315,7 @@ def _valid_value(field: str, value: str) -> bool:
         return False
     digits = sum(ch.isdigit() for ch in value)
     if field == "account_no":
-        return digits >= 4
+        return digits >= 4 and _ACCOUNT_NO_RE.fullmatch(value) is not None
     if field == "account_name":
         return any(ch.isalpha() for ch in value) and digits <= 0.3 * len(value)
     if field == "period":
