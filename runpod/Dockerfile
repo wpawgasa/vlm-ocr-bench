@@ -53,7 +53,8 @@ RUN pip install --no-cache-dir --no-deps \
     && python3 -c "import TeleOCR_vllm, teleocr_no_repeat_ngram; print('TeleOCR vLLM plugin + logits processor OK')"
 
 # PaddleOCR-VL: PaddleX as .devcontainer/paddle-pipeline.Dockerfile installs it, GPU wheel.
-# The supervisor that runs vLLM and the pipelines together is added with task 2.3.
+# One worker, one public port (D3): paddle_supervisor.py runs vLLM on 127.0.0.1:8000,
+# PADDLE_PIPELINES pipeline servers on 127.0.0.1:8081..., and paddle_front.py on $PORT.
 FROM plain AS paddle
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -68,3 +69,12 @@ RUN pip install --no-cache-dir "${PADDLE_PKG}==3.3.1" -i "${PADDLE_INDEX}" \
     && paddlex --install serving -y \
     && paddlex --get_pipeline_config PaddleOCR-VL-1.6 --save_path /config \
     && python3 -c "import yaml; yaml.safe_load(open('/config/PaddleOCR-VL-1.6.yaml'))"
+
+COPY .devcontainer/paddle-pipeline-entrypoint.py /app/paddle-pipeline-entrypoint.py
+COPY runpod/paddle_front.py /app/paddle_front.py
+COPY runpod/paddle_supervisor.py /app/paddle_supervisor.py
+
+ENV PORT=8080 \
+    PADDLE_PIPELINES=2
+EXPOSE 8080
+ENTRYPOINT ["python3", "/app/paddle_supervisor.py"]

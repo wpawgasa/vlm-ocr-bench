@@ -82,6 +82,30 @@ def test_paddle_installs_gpu_paddlex():
     assert "paddleocr[doc-parser]==3.7.0" in paddle
 
 
+def test_paddle_install_matches_devcontainer_pipeline_image():
+    """Same RUN as .devcontainer/paddle-pipeline.Dockerfile, only the wheel default differs."""
+    dev = (ROOT / ".devcontainer" / "paddle-pipeline.Dockerfile").read_text().replace("\\\n", " ")
+    dev_run = next(ln for ln in dev.splitlines() if "paddleocr[doc-parser]" in ln)
+    stage = _stages()["paddle"]
+    paddle_run = next(ln for ln in stage.splitlines() if "paddleocr[doc-parser]" in ln)
+
+    def norm(s: str) -> str:
+        return " ".join(s.split()).replace("python3 ", "python ")
+
+    assert norm(paddle_run) == norm(dev_run)
+
+
+def test_paddle_runs_supervisor_and_front_on_8080():
+    paddle = _stages()["paddle"]
+    for f in ("runpod/paddle_supervisor.py", "runpod/paddle_front.py"):
+        assert f in paddle
+    assert ".devcontainer/paddle-pipeline-entrypoint.py" in paddle
+    assert "PORT=8080" in paddle
+    assert "PADDLE_PIPELINES=2" in paddle
+    assert "EXPOSE 8080" in paddle
+    assert re.search(r'ENTRYPOINT \[.*paddle_supervisor\.py"\]', paddle)
+
+
 @pytest.mark.live
 def test_plain_build_with_fake_vllm_prints_rendered_argv():
     """Needs docker and network (pulls python:3.11-slim); vllm and huggingface_hub are stubs."""
