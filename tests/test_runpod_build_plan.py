@@ -1,4 +1,7 @@
-"""Build plan + workflow checks for .github/workflows/runpod-images.yml (task 2.4)."""
+"""Build plan + workflow checks for runpod/ci/runpod-images.yml (task 2.4).
+
+The workflow is installed as .github/workflows/runpod-images.yml by the runner.
+"""
 
 import json
 import shutil
@@ -11,7 +14,7 @@ import yaml
 from ocr_bench.runpod.build_plan import affected_models, build_matrix
 
 ROOT = Path(__file__).resolve().parent.parent
-WORKFLOW = ROOT / ".github" / "workflows" / "runpod-images.yml"
+WORKFLOW = ROOT / "runpod" / "ci" / "runpod-images.yml"
 CONFIGS = ROOT / "configs" / "runpod"
 
 
