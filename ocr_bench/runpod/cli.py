@@ -1,15 +1,21 @@
 """`ocrbench runpod ...` commands (design D4): render, build and deploy."""
 
+import asyncio
 import getpass
 import json
+import os
 import shlex
 import subprocess
 from datetime import date
 from pathlib import Path
 
+import httpx
 import typer
 import yaml
 
+from ocr_bench.config import ConfigError, load_model_config
+from ocr_bench.models.registry import build_model
+from ocr_bench.models.vllm_client import EndpointUnavailable
 from ocr_bench.runpod import manage, releases
 from ocr_bench.runpod import review as runpod_review
 from ocr_bench.runpod import state as runpod_state
@@ -24,6 +30,7 @@ from ocr_bench.runpod.deploy import (
 from ocr_bench.runpod.deploy import deploy as run_deploy
 from ocr_bench.runpod.releases import ReleaseRecordError
 from ocr_bench.runpod.render import endpoint_body, image_repo, template_body
+from ocr_bench.runpod.smoke import SmokeReport, run_smoke
 
 runpod_app = typer.Typer(no_args_is_help=True, help="Build and deploy Runpod serving endpoints.")
 
@@ -279,3 +286,37 @@ def status(
     typer.echo(f"workers:     {st.workers if st.workers is not None else 'unknown'}")
     if st.review_problem:
         typer.echo(f"warning: promotion no longer valid: {st.review_problem}")
+
+
+@runpod_app.command()
+def smoke(model: str, configs_dir: Path = _ConfigsDir) -> None:
+    """Check MODEL's endpoint: health, served name, one page, auth rejection, latency."""
+    cfg = _load(model, configs_dir)
+    try:
+        mcfg = load_model_config(configs_dir.parent / "models" / f"{model}.yaml", model)
+        os.environ["OCRBENCH_ENDPOINT_WAIT_S"] = str(cfg.client.cold_start_wait_s)
+        built = build_model(mcfg)
+    except (ConfigError, EndpointUnavailable) as e:
+        raise _fail(str(e)) from e
+
+    async def go() -> SmokeReport:
+        async with httpx.AsyncClient() as http:
+            return await run_smoke(
+                cfg,
+                mcfg,
+                built,
+                base_url=built.client.base_url,  # type: ignore[attr-defined]
+                api_key=getattr(built.client, "api_key", None),
+                http=http,
+            )
+
+    report = asyncio.run(go())
+    typer.echo(f"cold start:   {report.cold_start_s:.1f}s (slo {cfg.slo.cold_start_p95_s:g}s)")
+    typer.echo(f"page request: {report.request_s:.1f}s (slo {cfg.slo.page_p95_s:g}s)")
+    if report.layout_s is not None:
+        typer.echo(f"layout:       {report.layout_s:.1f}s")
+    for failure in report.failures:
+        typer.echo(f"FAIL: {failure}", err=True)
+    if not report.ok:
+        raise typer.Exit(1)
+    typer.echo(f"{model}: smoke passed (served {mcfg.served_model_name})")
