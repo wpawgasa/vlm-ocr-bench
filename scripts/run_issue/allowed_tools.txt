@@ -1,0 +1,31 @@
+# Tools the implementing agent may use without a prompt (claude --allowedTools).
+# Deliberately absent: git push, gh pr, gh api, curl/wget. The runner pushes,
+# opens the PR and merges itself.
+Read
+Edit
+Write
+Glob
+Grep
+Skill
+TodoWrite
+Bash(uv run:*)
+Bash(uv sync:*)
+Bash(git add:*)
+Bash(git rm:*)
+Bash(git mv:*)
+Bash(git commit:*)
+Bash(git status:*)
+Bash(git diff:*)
+Bash(git log:*)
+Bash(git show:*)
+Bash(gh issue view:*)
+Bash(openspec:*)
+Bash(ls:*)
+Bash(cat:*)
+Bash(rg:*)
+Bash(grep:*)
+Bash(find:*)
+Bash(head:*)
+Bash(tail:*)
+Bash(wc:*)
+Bash(mkdir:*)

@@ -339,3 +339,69 @@ def test_expand_issues_falls_back_to_task_refs(fakes: Fakes) -> None:
 def test_expand_issues_keeps_leaf(fakes: Fakes) -> None:
     add_issue(fakes, 7, "leaf [Opus]: x", state="closed")
     assert out("expand_issues", REPO, "7", env=fakes.env) == "7 closed"
+
+
+# --- templates and allowlist -------------------------------------------------
+
+TEMPLATE_KEYS = {
+    "implement.md": [
+        "REPO",
+        "BASE",
+        "ISSUE_NUMBER",
+        "ISSUE_TITLE",
+        "ROUTING",
+        "TRAILER",
+        "ISSUE_BODY",
+    ],
+    "fix.md": ["ISSUE_NUMBER", "ISSUE_TITLE", "FAILURE_KIND", "TRAILER", "FAILURE_LOG"],
+    "route.md": ["ISSUE_NUMBER", "ISSUE_TITLE", "ISSUE_BODY"],
+}
+
+
+@pytest.mark.parametrize("name", sorted(TEMPLATE_KEYS))
+def test_template_renders_every_placeholder(name: str) -> None:
+    pairs = [f"{key}=<{key.lower()}>" for key in TEMPLATE_KEYS[name]]
+    rendered = out("render_template", str(TEMPLATES / name), *pairs)
+    assert "{{" not in rendered
+    assert f"<!-- run_issue:{name.removesuffix('.md')} -->" in rendered
+    for key in TEMPLATE_KEYS[name]:
+        assert f"<{key.lower()}>" in rendered
+
+
+def test_implement_prompt_requires_superpowers_tests_and_pr_body() -> None:
+    text = (TEMPLATES / "implement.md").read_text()
+    for needle in [
+        "superpowers:test-driven-development",
+        "superpowers:systematic-debugging",
+        "superpowers:verification-before-completion",
+        'uv run pytest -m "not live"',
+        ".run_issue/PR_BODY.md",
+        "## Summary",
+        "## Implementation details",
+        "## In plain words",
+        "## Verification",
+        "## Routing",
+        "RESULT: done",
+        "RESULT: blocked:",
+        "Closes #{{ISSUE_NUMBER}}",
+    ]:
+        assert needle in text, needle
+
+
+def test_fix_prompt_uses_systematic_debugging() -> None:
+    text = (TEMPLATES / "fix.md").read_text()
+    assert "superpowers:systematic-debugging" in text
+    assert "RESULT: done" in text
+
+
+def test_route_prompt_uses_model_routing_and_asks_for_json() -> None:
+    text = (TEMPLATES / "route.md").read_text()
+    assert "model-routing" in text
+    assert '{"tier":' in text
+
+
+def test_allowlist_excludes_irreversible_commands() -> None:
+    tools = out("load_tools", str(TEMPLATES / "allowed_tools.txt")).splitlines()
+    assert {"Read", "Edit", "Write", "Skill", "Bash(uv run:*)", "Bash(git commit:*)"} <= set(tools)
+    for entry in tools:
+        assert not entry.startswith(("Bash(git push", "Bash(gh pr", "Bash(gh api")), entry
