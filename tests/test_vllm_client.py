@@ -291,3 +291,102 @@ def test_streaming_records_ttft_and_text():
     assert result.prompt_tokens == 7 and result.completion_tokens == 2
     assert result.ttft_ms is not None and result.ttft_ms <= result.latency_ms
     assert fake.completions.calls[0]["stream"] is True
+
+
+class _FakeClock:
+    """Virtual time: `sleep` advances `now` instead of waiting."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def _waiting_client(handler, wait_ready_s=0.0, url="https://abc.api.runpod.ai/v1"):
+    clock = _FakeClock()
+    client = VllmClient(
+        url,
+        "m",
+        client=FakeOpenAI([]),
+        http_client=_http(handler),
+        wait_ready_s=wait_ready_s,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    return client, clock
+
+
+def test_bearer_header_on_chat_health_and_version():
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers.get("authorization"))
+        return httpx.Response(200, json={"version": "0.22.1"})
+
+    client = VllmClient(
+        "https://abc.api.runpod.ai/v1", "m", api_key="sk-test", http_client=_http(handler)
+    )
+    asyncio.run(client.health())
+    assert asyncio.run(client.version()) == "0.22.1"
+    assert seen == ["Bearer sk-test", "Bearer sk-test"]
+    assert client._client.api_key == "sk-test"  # chat uses the SDK's bearer header
+
+
+def test_health_without_api_key_sends_no_authorization():
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers.get("authorization"))
+        return httpx.Response(200)
+
+    client = VllmClient("http://t:8000/v1", "m", client=FakeOpenAI([]), http_client=_http(handler))
+    asyncio.run(client.health())
+    assert seen == [None]
+
+
+def test_health_waits_through_204_and_gateway_errors_then_200():
+    statuses = iter([204, 204, 502, 503, 200])
+    client, clock = _waiting_client(lambda r: httpx.Response(next(statuses)), wait_ready_s=600)
+    asyncio.run(client.health())
+    assert clock.sleeps == [5.0, 5.0, 5.0, 5.0]
+
+
+def test_health_budget_exhausted_reports_last_status():
+    client, clock = _waiting_client(lambda r: httpx.Response(204), wait_ready_s=12)
+    with pytest.raises(EndpointUnavailable) as exc_info:
+        asyncio.run(client.health())
+    assert "204" in str(exc_info.value)
+    assert clock.now <= 15
+
+
+def test_zero_budget_fails_immediately_on_204():
+    client, clock = _waiting_client(lambda r: httpx.Response(204))
+    with pytest.raises(EndpointUnavailable) as exc_info:
+        asyncio.run(client.health())
+    assert "204" in str(exc_info.value)
+    assert clock.sleeps == []
+
+
+def test_other_statuses_do_not_wait():
+    client, clock = _waiting_client(lambda r: httpx.Response(401), wait_ready_s=600)
+    with pytest.raises(EndpointUnavailable):
+        asyncio.run(client.health())
+    assert clock.sleeps == []
+
+
+def test_plaintext_runpod_url_is_refused_naming_the_variable():
+    with pytest.raises(ValueError, match="DOTSOCR_BASE_URL"):
+        VllmClient(
+            "http://abc.api.runpod.ai/v1",
+            "m",
+            client=FakeOpenAI([]),
+            base_url_env="DOTSOCR_BASE_URL",
+        )
+    VllmClient("https://abc.api.runpod.ai/v1", "m", client=FakeOpenAI([]))
+    VllmClient("http://t:8000/v1", "m", client=FakeOpenAI([]))

@@ -11,8 +11,10 @@ import base64
 import io
 import os
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import openai
@@ -22,6 +24,9 @@ from ocr_bench.config import Sampling
 
 DEFAULT_TIMEOUT_S = 120.0
 HEALTH_TIMEOUT_S = 10.0
+HEALTH_POLL_S = 5.0
+INITIALISING_STATUSES = frozenset({204, 502, 503})  # worker not ready yet (Runpod gateway)
+RUNPOD_HOST_SUFFIX = "api.runpod.ai"
 
 
 class EndpointUnavailable(RuntimeError):
@@ -45,6 +50,46 @@ class CallResult:
     attempts: int = 0
     started: float = 0.0  # time.perf_counter() at the call's start
     ended: float = 0.0  # time.perf_counter() at the call's end
+
+
+def auth_headers(api_key: str | None) -> dict[str, str]:
+    return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
+def require_tls_for_runpod(base_url: str, env_name: str | None) -> None:
+    """Refuse `http://` for a Runpod host: the bearer key would travel in clear text."""
+    parsed = urlparse(base_url)
+    if parsed.scheme == "http" and (parsed.hostname or "").endswith(RUNPOD_HOST_SUFFIX):
+        raise ValueError(
+            f"{env_name or 'the endpoint URL'} is {base_url}: refusing plaintext http:// for "
+            f"*.{RUNPOD_HOST_SUFFIX}; use https://"
+        )
+
+
+async def wait_until_healthy(
+    get: Callable[[], Awaitable[httpx.Response]],
+    *,
+    model: str,
+    base_url: str,
+    url: str,
+    wait_ready_s: float,
+    sleep: Callable[[float], Awaitable[None]],
+    clock: Callable[[], float],
+) -> None:
+    """Poll `get` until it answers 200. 204/502/503 mean "initialising" and are retried every
+    `HEALTH_POLL_S` while the `wait_ready_s` budget lasts; anything else fails at once."""
+    deadline = clock() + wait_ready_s
+    while True:
+        try:
+            response = await get()
+        except httpx.HTTPError as exc:
+            raise EndpointUnavailable(model, base_url, str(exc)) from exc
+        status = response.status_code
+        if status == 200:
+            return
+        if status not in INITIALISING_STATUSES or clock() >= deadline:
+            raise EndpointUnavailable(model, base_url, f"GET {url} -> {status}")
+        await sleep(HEALTH_POLL_S)
 
 
 def health_url(base_url: str) -> str:
@@ -109,7 +154,17 @@ class VllmClient:
         http_client: httpx.AsyncClient | None = None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         model_label: str | None = None,
+        api_key: str | None = None,
+        wait_ready_s: float = 0.0,
+        base_url_env: str | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ):
+        require_tls_for_runpod(base_url, base_url_env)
+        self.api_key = api_key
+        self.wait_ready_s = wait_ready_s
+        self._sleep = sleep
+        self._clock = clock
         self.base_url = base_url
         self.served_model_name = served_model_name
         self.system_prompt = system_prompt
@@ -120,37 +175,37 @@ class VllmClient:
             # The SDK's own retries are off: the retry policy lives in `chat`.
             client = openai.AsyncOpenAI(
                 base_url=base_url,
-                api_key=os.environ.get("OPENAI_API_KEY", "EMPTY"),
+                api_key=api_key or os.environ.get("OPENAI_API_KEY", "EMPTY"),
                 max_retries=0,
                 timeout=timeout_s + 10,
             )
         self._client = client
         self._http_client = http_client
 
+    async def _get(self, url: str) -> httpx.Response:
+        headers = auth_headers(self.api_key)
+        if self._http_client is not None:
+            return await self._http_client.get(url, headers=headers, timeout=HEALTH_TIMEOUT_S)
+        async with httpx.AsyncClient() as http:
+            return await http.get(url, headers=headers, timeout=HEALTH_TIMEOUT_S)
+
     async def health(self) -> None:
         url = health_url(self.base_url)
-        try:
-            if self._http_client is not None:
-                response = await self._http_client.get(url, timeout=HEALTH_TIMEOUT_S)
-            else:
-                async with httpx.AsyncClient() as http:
-                    response = await http.get(url, timeout=HEALTH_TIMEOUT_S)
-        except httpx.HTTPError as exc:
-            raise EndpointUnavailable(self.model_label, self.base_url, str(exc)) from exc
-        if response.status_code != 200:
-            raise EndpointUnavailable(
-                self.model_label, self.base_url, f"GET {url} -> {response.status_code}"
-            )
+        await wait_until_healthy(
+            lambda: self._get(url),
+            model=self.model_label,
+            base_url=self.base_url,
+            url=url,
+            wait_ready_s=self.wait_ready_s,
+            sleep=self._sleep,
+            clock=self._clock,
+        )
 
     async def version(self) -> str:
         """The server's vLLM version from `GET /version`, or "unknown" if unavailable."""
         url = health_url(self.base_url)[: -len("/health")] + "/version"
         try:
-            if self._http_client is not None:
-                response = await self._http_client.get(url, timeout=HEALTH_TIMEOUT_S)
-            else:
-                async with httpx.AsyncClient() as http:
-                    response = await http.get(url, timeout=HEALTH_TIMEOUT_S)
+            response = await self._get(url)
             if response.status_code == 200:
                 return str(response.json().get("version") or "unknown")
         except (httpx.HTTPError, ValueError, AttributeError):

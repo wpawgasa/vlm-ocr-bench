@@ -241,6 +241,36 @@ def client_with(handler) -> tuple[PipelineClient, list[httpx.Request]]:
     return PipelineClient("http://pipe:8080/", endpoint, http_client=http), seen
 
 
+def test_pipeline_client_bearer_wait_and_plaintext_refusal():
+    statuses = iter([204, 200])
+    auth = []
+
+    def handler(request):
+        auth.append(request.headers.get("authorization"))
+        return httpx.Response(next(statuses))
+
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    endpoint = PipelineEndpoint(endpoint_env="X")
+    client = PipelineClient(
+        "https://abc.api.runpod.ai",
+        endpoint,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        api_key="sk-p",
+        wait_ready_s=60,
+        sleep=fake_sleep,
+        clock=lambda: 0.0,
+    )
+    asyncio.run(client.health())
+    assert auth == ["Bearer sk-p", "Bearer sk-p"]
+    assert slept == [5.0]
+    with pytest.raises(ValueError, match="PADDLE_PIPELINE_URL"):
+        PipelineClient("http://abc.api.runpod.ai", endpoint, base_url_env="PADDLE_PIPELINE_URL")
+
+
 def test_page_result_strips_images_and_rejects_errors():
     page = page_result(OK_ENVELOPE)
     assert page == {"prunedResult": {"parsing_res_list": BLOCKS}, "markdown": {"text": "md"}}
