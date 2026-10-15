@@ -44,6 +44,7 @@ from ocr_bench.models.vllm_client import EndpointUnavailable
 from ocr_bench.paths import MissingArtifactError, RunPaths, require
 from ocr_bench.runpod import releases
 from ocr_bench.runpod import state as runpod_state
+from ocr_bench.runpod.cli import runpod_app
 from ocr_bench.schemas import (
     GROUND_TRUTH,
     Condition,
@@ -539,6 +540,7 @@ dupset_app = typer.Typer(
     help="Duplicate-statement test set: build it, then evaluate the detector.",
 )
 app.add_typer(dupset_app, name="dupset")
+app.add_typer(runpod_app, name="runpod")
 
 
 @dupset_app.command("build")
