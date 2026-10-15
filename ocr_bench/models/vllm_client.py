@@ -11,8 +11,8 @@ import base64
 import io
 import os
 import time
-from dataclasses import dataclass, field
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
