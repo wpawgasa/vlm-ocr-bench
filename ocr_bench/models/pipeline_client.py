@@ -23,8 +23,12 @@ from PIL import Image
 
 from ocr_bench.config import PipelineEndpoint
 from ocr_bench.models.vllm_client import (
+    COLD_START_BACKOFF_S,
+    DEFAULT_MAX_REQUEST_MB,
     HEALTH_TIMEOUT_S,
     auth_headers,
+    is_cold_start,
+    oversize_error,
     require_tls_for_runpod,
     wait_until_healthy,
 )
@@ -80,12 +84,15 @@ class PipelineClient:
         base_url_env: str | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
+        max_request_mb: float = DEFAULT_MAX_REQUEST_MB,
     ):
         require_tls_for_runpod(base_url, base_url_env)
         self.api_key = api_key
         self.wait_ready_s = wait_ready_s
+        self.max_request_mb = max_request_mb
         self._sleep = sleep
         self._clock = clock
+        self._created = clock()
         self.base_url = base_url.rstrip("/")
         self.endpoint = endpoint
         self.model_label = model_label
@@ -121,9 +128,13 @@ class PipelineClient:
     async def layout(self, image: Image.Image) -> PipelineResult:
         body = {**self.endpoint.request, "file": image_b64(image), "fileType": 1}
         started = time.perf_counter()
+        too_big = oversize_error(body, self.max_request_mb)
+        if too_big is not None:
+            return PipelineResult(error=too_big, started=started, ended=started)
         last_error = "no attempt made"
         attempts = 0
-        for _ in range(2):
+        failures = 0  # cold-start waits do not count: only these use up the single retry
+        while failures < 2:
             attempts += 1
             try:
                 if self._http_client is not None:
@@ -131,11 +142,16 @@ class PipelineClient:
                 else:
                     async with httpx.AsyncClient() as http:
                         response = await self._post(http, body)
-                if response.status_code >= 500:
-                    last_error = f"HTTP {response.status_code}: {response.text[:200]}"
-                    continue
                 if response.status_code >= 400:
-                    raise _NoRetry(f"HTTP {response.status_code}: {response.text[:200]}")
+                    last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+                    in_window = self._clock() - self._created < self.wait_ready_s
+                    if in_window and is_cold_start(response.status_code, response.text):
+                        await self._sleep(COLD_START_BACKOFF_S)
+                        continue
+                    if response.status_code < 500:
+                        raise _NoRetry(last_error)
+                    failures += 1
+                    continue
                 page = page_result(response.json())
             except asyncio.CancelledError:
                 raise
@@ -147,6 +163,7 @@ class PipelineClient:
                 break
             except Exception as exc:  # timeouts, transport errors
                 last_error = f"{type(exc).__name__}: {exc}"
+                failures += 1
                 continue
             ended = time.perf_counter()
             return PipelineResult(

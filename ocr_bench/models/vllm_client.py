@@ -9,6 +9,7 @@ fails for good returns a `CallResult` with `error` set and empty text.
 import asyncio
 import base64
 import io
+import json
 import os
 import time
 from collections.abc import Awaitable, Callable
@@ -27,6 +28,10 @@ HEALTH_TIMEOUT_S = 10.0
 HEALTH_POLL_S = 5.0
 INITIALISING_STATUSES = frozenset({204, 502, 503})  # worker not ready yet (Runpod gateway)
 RUNPOD_HOST_SUFFIX = "api.runpod.ai"
+COLD_START_STATUSES = frozenset({502, 503})
+COLD_START_BACKOFF_S = 5.0
+NO_WORKERS_MARKER = "no workers available"
+DEFAULT_MAX_REQUEST_MB = 25.0
 
 
 class EndpointUnavailable(RuntimeError):
@@ -64,6 +69,19 @@ def require_tls_for_runpod(base_url: str, env_name: str | None) -> None:
             f"{env_name or 'the endpoint URL'} is {base_url}: refusing plaintext http:// for "
             f"*.{RUNPOD_HOST_SUFFIX}; use https://"
         )
+
+
+def is_cold_start(status: int | None, body: str) -> bool:
+    """A Runpod gateway answer that means "no worker is up yet": 502/503 or the no-workers body."""
+    return status in COLD_START_STATUSES or NO_WORKERS_MARKER in body.lower()
+
+
+def oversize_error(payload: Any, max_request_mb: float) -> str | None:
+    """`request 31.2 MB exceeds 25 MB` when the JSON body is over the limit, else None."""
+    size_mb = len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) / (1024 * 1024)
+    if size_mb <= max_request_mb:
+        return None
+    return f"request {size_mb:.1f} MB exceeds {max_request_mb:g} MB"
 
 
 async def wait_until_healthy(
@@ -159,12 +177,15 @@ class VllmClient:
         base_url_env: str | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
+        max_request_mb: float = DEFAULT_MAX_REQUEST_MB,
     ):
         require_tls_for_runpod(base_url, base_url_env)
         self.api_key = api_key
         self.wait_ready_s = wait_ready_s
+        self.max_request_mb = max_request_mb
         self._sleep = sleep
         self._clock = clock
+        self._created = clock()
         self.base_url = base_url
         self.served_model_name = served_model_name
         self.system_prompt = system_prompt
@@ -240,9 +261,13 @@ class VllmClient:
             kwargs["stream_options"] = {"include_usage": True}
 
         started = time.perf_counter()
+        too_big = oversize_error(kwargs, self.max_request_mb)
+        if too_big is not None:
+            return CallResult(error=too_big, started=started, ended=started)
         last_error = "no attempt made"
         attempts = 0
-        for _ in range(2):
+        failures = 0  # cold-start waits do not count: only these use up the single retry
+        while failures < 2:
             attempts += 1
             try:
                 result = await asyncio.wait_for(self._attempt(kwargs, stream), self.timeout_s)
@@ -250,11 +275,15 @@ class VllmClient:
                 raise
             except openai.APIStatusError as exc:
                 last_error = _describe(exc)
+                if await self._cold_start_backoff(exc.status_code, last_error):
+                    continue
+                failures += 1
                 if exc.status_code < 500:
                     break
                 continue
             except Exception as exc:  # timeouts, transport errors, malformed responses
                 last_error = _describe(exc)
+                failures += 1
                 continue
             ended = time.perf_counter()
             call = result.to_call_result()
@@ -272,6 +301,13 @@ class VllmClient:
             ended=ended,
             latency_ms=(ended - started) * 1000.0,
         )
+
+    async def _cold_start_backoff(self, status: int | None, text: str) -> bool:
+        """Sleep and return True when a cold-start answer arrives inside the wait budget."""
+        if self._clock() - self._created >= self.wait_ready_s or not is_cold_start(status, text):
+            return False
+        await self._sleep(COLD_START_BACKOFF_S)
+        return True
 
     async def _attempt(self, kwargs: dict[str, Any], stream: bool) -> "_AttemptResult":
         attempt_start = time.perf_counter()

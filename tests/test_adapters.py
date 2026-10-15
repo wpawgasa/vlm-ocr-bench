@@ -358,3 +358,14 @@ def test_teleocr_postprocess_keeps_non_otsl_table_text():
     assert m.postprocess_block("table", "ตารางที่อ่านไม่ได้") == "ตารางที่อ่านไม่ได้"
     assert m.postprocess_block("char", "<fcel>a<nl>") == "<table><tr><td>a</td></tr></table>"
     assert m.postprocess_block("text", "<fcel>a<nl>") == "<fcel>a<nl>"
+
+
+def test_oversized_page_becomes_an_error_row():
+    from ocr_bench.models.vllm_client import VllmClient
+
+    fake = FakeOpenAI([completion("x")])
+    client = VllmClient("http://fake:8000/v1", "served", client=fake, max_request_mb=0.0001)
+    m = build_model(cfg("teleocr"), client=client)
+    pred = run(m, row(Task.ocr_fullpage), IMG)
+    assert pred.raw.error is not None and "exceeds" in pred.raw.error
+    assert fake.completions.calls == []

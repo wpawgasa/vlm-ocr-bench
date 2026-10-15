@@ -390,3 +390,66 @@ def test_plaintext_runpod_url_is_refused_naming_the_variable():
         )
     VllmClient("https://abc.api.runpod.ai/v1", "m", client=FakeOpenAI([]))
     VllmClient("http://t:8000/v1", "m", client=FakeOpenAI([]))
+
+
+def _no_workers_error() -> openai.APIStatusError:
+    request = httpx.Request("POST", "https://abc.api.runpod.ai/v1/chat/completions")
+    response = httpx.Response(400, request=request)
+    return openai.BadRequestError("no workers available", response=response, body=None)
+
+
+def _cold_client(script, wait_ready_s=600.0, **kwargs):
+    clock = _FakeClock()
+    fake = FakeOpenAI(script)
+    client = VllmClient(
+        "https://abc.api.runpod.ai/v1",
+        "m",
+        client=fake,
+        wait_ready_s=wait_ready_s,
+        sleep=clock.sleep,
+        clock=clock,
+        **kwargs,
+    )
+    return client, fake, clock
+
+
+def test_cold_start_502_503_retry_every_5s_until_success():
+    script = [status_error(502), status_error(503), _no_workers_error(), completion("ok")]
+    client, fake, clock = _cold_client(script)
+    result = _chat(client)
+    assert result.error is None and result.text == "ok"
+    assert clock.sleeps == [5.0, 5.0, 5.0]
+    assert len(fake.completions.calls) == 4
+
+
+def test_cold_start_retry_stops_when_budget_ends():
+    client, fake, clock = _cold_client([status_error(503)] * 20, wait_ready_s=12)
+    result = _chat(client)
+    assert result.error is not None and "503" in result.error
+    assert clock.now <= 17
+    assert len(fake.completions.calls) < 20
+
+
+def test_cold_start_retry_does_not_use_the_single_retry():
+    # once the window has passed a failure still gets its one normal retry
+    client, fake, clock = _cold_client([status_error(503), status_error(500), completion("ok")], 4)
+    result = _chat(client)
+    assert result.error is None
+    assert len(fake.completions.calls) == 3
+
+
+def test_normal_single_retry_unchanged_without_wait_budget():
+    client, fake, clock = _cold_client([status_error(503), status_error(503)], wait_ready_s=0.0)
+    result = _chat(client)
+    assert result.error is not None and result.attempts == 2
+    assert clock.sleeps == []
+    assert len(fake.completions.calls) == 2
+
+
+def test_oversized_request_is_not_sent():
+    client, fake, _ = _cold_client([completion("x")], max_request_mb=0.0001)
+    result = _chat(client)
+    assert result.text == "" and result.attempts == 0
+    assert result.error is not None
+    assert result.error.startswith("request ") and result.error.endswith("MB exceeds 0.0001 MB")
+    assert fake.completions.calls == []
