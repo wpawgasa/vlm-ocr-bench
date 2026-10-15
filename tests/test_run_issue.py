@@ -541,3 +541,127 @@ def test_fable_gate(sandbox: Fakes, flags: list[str], expected: str) -> None:
     result = run_runner(sandbox, "--issues", "5", "--dry-run", *flags)
     assert result.returncode == 0, result.stderr
     assert expected in result.stdout
+
+
+# --- end to end: implement phase ---------------------------------------------
+
+
+def ship_ok(sandbox: Fakes, n: int) -> None:
+    """Script a PR for issue N whose CI passes."""
+    sandbox.gh(rf"^pr list -R {REPO} --head issue/{n}-", "")
+    sandbox.gh(rf"^pr create .*--head issue/{n}-", f"https://github.com/{REPO}/pull/{n}\n")
+    sandbox.gh(
+        rf"^pr view \S+/pull/{n} .*headRefOid",
+        "@SH:git --git-dir=\"$FAKE_ORIGIN\" for-each-ref --format='%(objectname)' "
+        f"'refs/heads/issue/{n}-*'",
+    )
+    sandbox.gh(rf"^pr checks \S+/pull/{n} -R {REPO} --json", "1\n")
+    sandbox.gh(rf"^pr checks \S+/pull/{n} -R {REPO} --watch", "")
+
+
+def test_implement_call_uses_model_allowlist_and_worktree(sandbox: Fakes) -> None:
+    add_issue(sandbox, 117, "runpod-serving 1.1 [Sonnet]: config loader")
+    ship_ok(sandbox, 117)
+
+    result = run_runner(sandbox, "--issues", "117")
+
+    assert result.returncode == 0, result.stderr
+    (impl,) = claude_calls(sandbox, "implement")
+    assert arg_after(impl["argv"], "--model") == "sonnet"
+    assert arg_after(impl["argv"], "--permission-mode") == "acceptEdits"
+    assert "--dangerously-skip-permissions" not in impl["argv"]
+    tools = impl["argv"][impl["argv"].index("--allowedTools") + 1 :]
+    assert "Bash(uv run:*)" in tools and not any("git push" in t for t in tools)
+    assert impl["api_key_set"] is False
+    assert impl["cwd"] == str(sandbox.work / ".claude" / "worktrees" / "issue-117")
+    assert "Closes #117" in impl["prompt"]
+    assert "tier tag [Sonnet] on the issue" in impl["prompt"]
+    assert "Co-Authored-By: Claude Sonnet" in impl["prompt"]
+    assert [c["argv"][:1] for c in sandbox.calls("uv")][0] == ["sync"]
+
+
+def test_issue_body_reaches_prompt_verbatim(sandbox: Fakes) -> None:
+    body = "Run `id` and $(touch pwned) & keep {{ISSUE_TITLE}} \\ ทดสอบ"
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: y", body=body)
+    ship_ok(sandbox, 117)
+    run_runner(sandbox, "--issues", "117")
+    (impl,) = claude_calls(sandbox, "implement")
+    assert body in impl["prompt"]
+    assert not (sandbox.work / "pwned").exists()
+
+
+def test_blocked_agent_halts_without_fix_rounds(sandbox: Fakes) -> None:
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: y")
+    add_issue(sandbox, 118, "x 1.2 [Sonnet]: z")
+    sandbox.claude("implement", {"result": "Cannot.\nRESULT: blocked: needs an H100"})
+
+    result = run_runner(sandbox, "--issues", "117,118")
+
+    assert result.returncode == 1
+    assert [c["kind"] for c in claude_calls(sandbox)] == ["implement"]
+    assert "blocked" in result.stdout
+    assert not (sandbox.work / ".claude" / "worktrees" / "issue-118").exists()
+    assert (sandbox.work / ".claude" / "worktrees" / "issue-117").exists()
+
+
+@pytest.mark.parametrize(
+    ("first_attempt", "expected_failure"),
+    [
+        ({"commit": "code", "pr_body": True}, "No files under tests/ changed"),
+        ({"commit": "test", "pr_body": True, "dirty": True}, "Uncommitted changes"),
+        ({"commit": "test"}, "PR body file missing"),
+        ({"pr_body": True}, "No commits on the branch"),
+        (
+            {"commit": "test", "pr_body": True, "result": "I think it is fine."},
+            "did not end with 'RESULT: done'",
+        ),
+    ],
+)
+def test_failed_post_check_sends_fix_prompt(
+    sandbox: Fakes, first_attempt: dict, expected_failure: str
+) -> None:
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: y")
+    ship_ok(sandbox, 117)
+    sandbox.claude("implement", first_attempt)
+    sandbox.claude("fix", {"commit": "test", "pr_body": True})
+
+    result = run_runner(sandbox, "--issues", "117")
+
+    fixes = claude_calls(sandbox, "fix")
+    assert fixes, result.stderr
+    assert expected_failure in fixes[0]["prompt"]
+    assert "local verification" in fixes[0]["prompt"]
+
+
+@pytest.mark.parametrize(
+    ("tier", "fix_models"), [("Sonnet", ["sonnet", "opus"]), ("Opus", ["opus"])]
+)
+def test_local_verification_failure_escalates_then_halts(
+    sandbox: Fakes, tier: str, fix_models: list[str]
+) -> None:
+    add_issue(sandbox, 117, f"x 1.1 [{tier}]: y")
+    sandbox.uv(r"^run ruff check", {"stdout": "E501 line too long\n", "exit": 1})
+    sandbox.claude("fix", {"commit": "test", "pr_body": True})
+
+    result = run_runner(sandbox, "--issues", "117")
+
+    assert result.returncode == 1
+    fixes = claude_calls(sandbox, "fix")
+    assert [arg_after(c["argv"], "--model") for c in fixes] == fix_models
+    assert "E501 line too long" in fixes[0]["prompt"]
+    assert not sandbox.gh_calls("pr create")
+    assert "blocked" in result.stdout
+
+
+def test_sonnet_escalates_to_opus_and_recovers(sandbox: Fakes) -> None:
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: y")
+    ship_ok(sandbox, 117)
+    sandbox.uv(r"^run ruff check", {"exit": 1}, {"exit": 1}, {"exit": 0})
+    sandbox.claude("fix", {"commit": "test", "pr_body": True})
+
+    result = run_runner(sandbox, "--issues", "117")
+
+    assert result.returncode == 0, result.stderr
+    fixes = claude_calls(sandbox, "fix")
+    assert [arg_after(c["argv"], "--model") for c in fixes] == ["sonnet", "opus"]
+    assert "sonnet>opus" in result.stdout

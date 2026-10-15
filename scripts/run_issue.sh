@@ -107,6 +107,101 @@ route_issue() {
   ROUTE_REASON="model-routing skill: $ROUTE_REASON"
 }
 
+# post_checks N STATUS — print why the agent's work on issue N is not ready and
+# return 1; return 0 when it finished, committed everything, changed tests, wrote
+# the PR body, and lint plus tests pass in the worktree.
+post_checks() {
+  local status=$2 out dirty
+  if [[ $status != done ]]; then
+    echo "The agent did not end with 'RESULT: done' (got: $status)."
+    return 1
+  fi
+  if [[ -z $(git -C "$ISSUE_WT" rev-list "origin/$BASE..HEAD") ]]; then
+    echo "No commits on the branch beyond origin/$BASE."
+    return 1
+  fi
+  dirty=$(git -C "$ISSUE_WT" status --porcelain -- . ':!.run_issue')
+  if [[ -n $dirty ]]; then
+    printf 'Uncommitted changes left in the worktree:\n%s\n' "$dirty"
+    return 1
+  fi
+  check_pr_body "$ISSUE_WT/.run_issue/PR_BODY.md" || return 1
+  if ! git -C "$ISSUE_WT" diff --name-only "origin/$BASE..HEAD" | grep -q '^tests/'; then
+    echo "No files under tests/ changed: every task in the issue needs a test."
+    return 1
+  fi
+  if ! out=$(cd "$ISSUE_WT" && uv run ruff check . 2>&1 &&
+    uv run ruff format --check . 2>&1 && uv run pytest -m "not live" -q 2>&1); then
+    printf 'Local verification failed:\n%s\n' "$(tail -n 200 <<<"$out")"
+    return 1
+  fi
+}
+
+# implement_issue N TITLE BODY MODEL REASON — create or reuse the issue's
+# worktree, run the implementing agent and check its work: one fix round on
+# MODEL, then one on Opus when MODEL is Sonnet. Sets ISSUE_WT, ISSUE_BRANCH and
+# ISSUE_MODEL. Returns 1 when the run must halt.
+implement_issue() {
+  local n=$1 title=$2 body=$3 model=$4 reason=$5 prompt status failure m reused=0
+  ISSUE_BRANCH=$(branch_name "$n" "$title")
+  ISSUE_WT="$ROOT/.claude/worktrees/issue-$n"
+  ISSUE_MODEL=$model
+  git -C "$ROOT" fetch -q origin >>"$CURRENT_LOG" 2>&1 || {
+    log "#$n: git fetch failed"
+    return 1
+  }
+  if [[ -d $ISSUE_WT ]]; then
+    reused=1
+  elif git -C "$ROOT" show-ref --verify --quiet "refs/heads/$ISSUE_BRANCH"; then
+    reused=1
+    git -C "$ROOT" worktree add -q "$ISSUE_WT" "$ISSUE_BRANCH" >>"$CURRENT_LOG" 2>&1 || return 1
+  else
+    git -C "$ROOT" worktree add -q -b "$ISSUE_BRANCH" "$ISSUE_WT" "origin/$BASE" \
+      >>"$CURRENT_LOG" 2>&1 || {
+      log "#$n: cannot create worktree $ISSUE_WT"
+      return 1
+    }
+  fi
+  (cd "$ISSUE_WT" && uv sync --all-extras --frozen) >>"$CURRENT_LOG" 2>&1 || {
+    log "#$n: uv sync failed"
+    return 1
+  }
+  if ((reused)) && post_checks "$n" done >/dev/null; then
+    log "#$n: reusing $ISSUE_BRANCH, which already passes the checks"
+    return 0
+  fi
+
+  prompt=$(render_template "$RUN_ISSUE_DIR/implement.md" "REPO=$REPO" "BASE=$BASE" \
+    "ISSUE_NUMBER=$n" "ISSUE_TITLE=$title" "ROUTING=$model ($reason)" \
+    "TRAILER=$(commit_trailer "$model")" "ISSUE_BODY=$body")
+  run_claude "$n" implement "$ISSUE_WT" "$model" "$prompt" "${IMPL_TOOLS[@]}"
+
+  local -a fix_models=("$model")
+  [[ $model != sonnet ]] || fix_models+=(opus)
+  for m in "${fix_models[@]}" ""; do
+    status=$(result_status "$CLAUDE_RESULT")
+    if [[ $status == blocked* ]]; then
+      OUT_OUTCOME[$n]=blocked
+      log "#$n: agent reported $status"
+      return 1
+    fi
+    if failure=$(post_checks "$n" "$status"); then
+      return 0
+    fi
+    [[ -n $m ]] || break
+    log "#$n: checks failed ($(head -n 1 <<<"$failure")); fix round on $m"
+    [[ $m == "$ISSUE_MODEL" ]] || OUT_MODEL[$n]+=">$m"
+    ISSUE_MODEL=$m
+    prompt=$(render_template "$RUN_ISSUE_DIR/fix.md" "ISSUE_NUMBER=$n" \
+      "ISSUE_TITLE=$title" "FAILURE_KIND=local verification" \
+      "TRAILER=$(commit_trailer "$m")" "FAILURE_LOG=$failure")
+    run_claude "$n" fix "$ISSUE_WT" "$m" "$prompt" "${IMPL_TOOLS[@]}"
+  done
+  OUT_OUTCOME[$n]=blocked
+  log "#$n: still failing after the fix rounds; worktree kept at $ISSUE_WT"
+  return 1
+}
+
 # process_issue N — route, implement and ship one open issue. Returns 1 when the
 # run must halt.
 process_issue() {
@@ -133,8 +228,8 @@ process_issue() {
     printf '#%s %s\n    -> %s (%s)\n' "$n" "$title" "$model" "$reason"
     return 0
   fi
-  log "#$n: implementation phase not available yet"
-  return 1
+  implement_issue "$n" "$title" "$body" "$model" "$reason" || return 1
+  OUT_OUTCOME[$n]=implemented
 }
 
 print_summary() {
