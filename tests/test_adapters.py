@@ -322,6 +322,24 @@ def test_build_model_without_endpoint_env_raises(monkeypatch):
     assert "DOTSOCR_BASE_URL" in str(exc_info.value)
 
 
+def test_build_model_resolves_api_key_and_wait(monkeypatch):
+    for var in ("DOTSOCR_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("OCRBENCH_ENDPOINT_WAIT_S", raising=False)
+    url = "http://dots:8000/v1"
+    m = build_model(cfg("dotsocr"), base_url=url)
+    assert m.client._client.api_key == "EMPTY"
+    assert m.client.wait_ready_s == 0.0
+    monkeypatch.setenv("OPENAI_API_KEY", "generic")
+    monkeypatch.setenv("OCRBENCH_ENDPOINT_WAIT_S", "90")
+    m = build_model(cfg("dotsocr"), base_url=url)
+    assert m.client._client.api_key == "generic"
+    assert m.client.wait_ready_s == 90.0
+    monkeypatch.setenv("DOTSOCR_API_KEY", "specific")
+    m = build_model(cfg("dotsocr"), base_url=url)
+    assert m.client._client.api_key == "specific"
+
+
 def test_build_model_picks_adapter_classes():
     from ocr_bench.models.dotsocr import DotsOCRModel
     from ocr_bench.models.teleocr import TeleOCRModel

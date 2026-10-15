@@ -14,6 +14,7 @@ import base64
 import io
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,7 +22,12 @@ import httpx
 from PIL import Image
 
 from ocr_bench.config import PipelineEndpoint
-from ocr_bench.models.vllm_client import HEALTH_TIMEOUT_S, EndpointUnavailable
+from ocr_bench.models.vllm_client import (
+    HEALTH_TIMEOUT_S,
+    auth_headers,
+    require_tls_for_runpod,
+    wait_until_healthy,
+)
 
 
 @dataclass
@@ -69,7 +75,17 @@ class PipelineClient:
         *,
         http_client: httpx.AsyncClient | None = None,
         model_label: str = "pipeline",
+        api_key: str | None = None,
+        wait_ready_s: float = 0.0,
+        base_url_env: str | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ):
+        require_tls_for_runpod(base_url, base_url_env)
+        self.api_key = api_key
+        self.wait_ready_s = wait_ready_s
+        self._sleep = sleep
+        self._clock = clock
         self.base_url = base_url.rstrip("/")
         self.endpoint = endpoint
         self.model_label = model_label
@@ -77,23 +93,30 @@ class PipelineClient:
 
     async def _post(self, http: httpx.AsyncClient, body: dict[str, Any]) -> httpx.Response:
         return await http.post(
-            self.base_url + self.endpoint.path, json=body, timeout=self.endpoint.timeout_s
+            self.base_url + self.endpoint.path,
+            json=body,
+            headers=auth_headers(self.api_key),
+            timeout=self.endpoint.timeout_s,
         )
+
+    async def _get(self, url: str) -> httpx.Response:
+        headers = auth_headers(self.api_key)
+        if self._http_client is not None:
+            return await self._http_client.get(url, headers=headers, timeout=HEALTH_TIMEOUT_S)
+        async with httpx.AsyncClient() as http:
+            return await http.get(url, headers=headers, timeout=HEALTH_TIMEOUT_S)
 
     async def health(self) -> None:
         url = self.base_url + self.endpoint.health_path
-        try:
-            if self._http_client is not None:
-                response = await self._http_client.get(url, timeout=HEALTH_TIMEOUT_S)
-            else:
-                async with httpx.AsyncClient() as http:
-                    response = await http.get(url, timeout=HEALTH_TIMEOUT_S)
-        except httpx.HTTPError as exc:
-            raise EndpointUnavailable(self.model_label, self.base_url, str(exc)) from exc
-        if response.status_code != 200:
-            raise EndpointUnavailable(
-                self.model_label, self.base_url, f"GET {url} -> {response.status_code}"
-            )
+        await wait_until_healthy(
+            lambda: self._get(url),
+            model=self.model_label,
+            base_url=self.base_url,
+            url=url,
+            wait_ready_s=self.wait_ready_s,
+            sleep=self._sleep,
+            clock=self._clock,
+        )
 
     async def layout(self, image: Image.Image) -> PipelineResult:
         body = {**self.endpoint.request, "file": image_b64(image), "fileType": 1}
