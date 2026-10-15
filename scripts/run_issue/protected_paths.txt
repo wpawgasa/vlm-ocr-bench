@@ -1,0 +1,7 @@
+# Path prefixes the implementing agent must not change (its own gate: CI, Claude
+# settings, the runner). scripts/run_issue.sh fails the local checks and sends a
+# fix round when the branch touches any of them. One prefix per line.
+.github/
+.claude/
+scripts/run_issue.sh
+scripts/run_issue/

@@ -23,8 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # poppler: pdffonts/pdftoppm/pdftotext for the bank-statement ingestion tests
+      # git: issue-runner end-to-end tests; shellcheck: lints scripts/run_issue*
       - name: System packages
-        run: apt-get update && apt-get install -y --no-install-recommends poppler-utils
+        run: apt-get update && apt-get install -y --no-install-recommends poppler-utils git shellcheck
       - name: Install
         run: uv sync --all-extras --frozen
       # NLTK METEOR (official ThaiOCRBench scorer) needs WordNet

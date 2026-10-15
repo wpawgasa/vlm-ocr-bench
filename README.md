@@ -87,3 +87,12 @@ scripts/serve_dotsocr.sh up
 
 The scripts work from the host or from inside the dev container. On the V100 dev box, smoke tests only:
 `COMPOSE_EXTRA=.devcontainer/compose.v100.yaml scripts/serve_dotsocr.sh up` (fp16 plus the old-driver workaround). Don't quote those numbers.
+
+## Issue runner
+
+`scripts/run_issue.sh` implements GitHub issues end to end with headless Claude Code on your subscription login:
+
+    scripts/run_issue.sh --issues 117,118          # sub-issues, in order
+    scripts/run_issue.sh --issues 116 --dry-run    # expand a group issue and show the model plan
+
+Per issue it picks the model from the `[Sonnet]`/`[Opus]` tag (or the `model-routing` skill when untagged; `[Human]` is skipped; `[Fable]` needs `--allow-fable`), implements it with tests in `.claude/worktrees/issue-<n>`, opens a PR, fixes CI failures (`--max-ci-fixes`, default 2) and squash-merges when CI passes. It stops at the first issue it cannot merge; rerun the same command to resume. Logs: `.claude/worktrees/run-logs/`. Design: `docs/superpowers/specs/2026-10-15-issue-runner-design.md`.
