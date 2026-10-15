@@ -309,3 +309,37 @@ def test_pipeline_client_does_not_retry_4xx_or_pipeline_errors():
     )
     result = asyncio.run(client.layout(IMG))
     assert result.error == "pipeline error 1: x" and len(seen) == 1
+
+
+def test_pipeline_client_cold_start_retries_then_succeeds():
+    statuses = iter([502, 503, 200])
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    def handler(request):
+        status = next(statuses)
+        if status == 200:
+            return httpx.Response(200, json=OK_ENVELOPE)
+        return httpx.Response(status, text="no workers available")
+
+    client = PipelineClient(
+        "https://abc.api.runpod.ai",
+        PipelineEndpoint(endpoint_env="X"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        wait_ready_s=600,
+        sleep=fake_sleep,
+        clock=lambda: 0.0,
+    )
+    result = asyncio.run(client.layout(IMG))
+    assert result.error is None and slept == [5.0, 5.0]
+
+
+def test_pipeline_client_oversized_request_is_not_sent():
+    client, seen = client_with(lambda n: httpx.Response(200, json=OK_ENVELOPE))
+    client.max_request_mb = 0.0001
+    result = asyncio.run(client.layout(IMG))
+    assert seen == [] and result.attempts == 0
+    assert result.error is not None and result.error.startswith("request ")
+    assert "exceeds 0.0001 MB" in result.error
