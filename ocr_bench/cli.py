@@ -43,6 +43,7 @@ from ocr_bench.models.runner import infer_model, pending_rows, summarize
 from ocr_bench.models.vllm_client import EndpointUnavailable
 from ocr_bench.paths import MissingArtifactError, RunPaths, require
 from ocr_bench.runpod import releases
+from ocr_bench.runpod import state as runpod_state
 from ocr_bench.schemas import (
     GROUND_TRUTH,
     Condition,
@@ -52,6 +53,7 @@ from ocr_bench.schemas import (
     NoGT,
     PredictionRow,
     PrepareSummary,
+    Source,
     Task,
 )
 from ocr_bench.statement_review import (
@@ -192,6 +194,30 @@ def _load_models(config: Path, models: str) -> tuple[ResolvedConfig, dict[str, M
     return resolved, cfgs
 
 
+def _refuse_unpromoted_client_data(cfgs: dict[str, ModelConfig], rows: list[ManifestRow]) -> None:
+    """Exit 2 if statement pages would go to a Runpod endpoint not promoted for client data.
+
+    Public pages and self-hosted URLs are unaffected. There is deliberately no override:
+    `OCRBENCH_ALLOW_UNPROMOTED` does not cover client-data sources (design D9).
+    """
+    if not any(row.source == Source.bankstmt for row in rows):
+        return
+    for name, cfg in cfgs.items():
+        host = urlparse(os.environ.get(cfg.endpoint_env, "")).hostname or ""
+        if not host.endswith(runpod_state.HOST_SUFFIX):
+            continue
+        found = runpod_state.endpoint_for_host(host)
+        if found is not None and found[1].get("client_data") is True:
+            continue
+        endpoint = found[0] if found else "(not in .runpod/state.yaml)"
+        typer.echo(
+            f"{name}: bank statement pages must not go to Runpod endpoint {endpoint}: "
+            "not promoted for client data (see `ocrbench runpod deploy --promote`)",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+
 def _connect(cfgs: dict[str, ModelConfig]) -> dict[str, OcrModel]:
     """Build each model's adapter and health-check it; exit 2 naming the model and URL."""
     try:
@@ -287,10 +313,11 @@ def infer(
     _require_or_exit(rp.manifest, "prepare")
     resolved, cfgs = _load_models(config, models)
     n_concurrent = concurrency or resolved.run.concurrency
+    rows = list(read_rows(rp.manifest, ManifestRow))
+    _refuse_unpromoted_client_data(cfgs, rows)
     built = _connect(cfgs)
     _write_infer_config(rp, cfgs, n_concurrent, asyncio.run(_server_versions(built)))
 
-    rows = list(read_rows(rp.manifest, ManifestRow))
     # Models run one after another: they may share a GPU, and page latency_ms should
     # not include contention from another model's server.
     for name, model in built.items():
