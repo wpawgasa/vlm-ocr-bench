@@ -43,3 +43,5 @@ build/
 
 # Model checkpoints (GBs). Keep them in DVC/GCS, never in git.
 models/
+.run_issue/
+.claude/worktrees/
