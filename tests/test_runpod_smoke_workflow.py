@@ -1,4 +1,8 @@
-"""Static checks of .github/workflows/runpod-smoke.yml (no network)."""
+"""Static checks of the Runpod smoke workflow (no network).
+
+The file lives at deploy/runpod/runpod-smoke.workflow.yml and is installed as
+.github/workflows/runpod-smoke.yml by a maintainer (the runner owns .github/workflows).
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "runpod-smoke.yml"
+WORKFLOW = ROOT / "deploy" / "runpod" / "runpod-smoke.workflow.yml"
 MODELS = ("dotsocr", "ovisocr2", "paddleocr_vl", "teleocr", "typhoon_ocr15")
 
 
