@@ -1,0 +1,62 @@
+name: Runpod smoke
+
+# 08:00-20:00 Asia/Bangkok (UTC+7) = 01:00-13:00 UTC, Monday-Friday, every 30 minutes.
+# Scheduled runs use the repository variable RUNPOD_SMOKE_MODELS (space- or comma-separated
+# model names); manual runs take the `models` input. Both default to all five models.
+on:
+  schedule:
+    - cron: "0,30 1-13 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "Models to smoke (space- or comma-separated)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      models: ${{ steps.list.outputs.models }}
+    steps:
+      - id: list
+        env:
+          REQUESTED: ${{ inputs.models || vars.RUNPOD_SMOKE_MODELS || 'dotsocr ovisocr2 paddleocr_vl teleocr typhoon_ocr15' }}
+        run: |
+          models=$(printf '%s' "$REQUESTED" | tr ',' ' ' | xargs -n1 | jq -R . | jq -sc .)
+          echo "models=$models" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ fromJSON(needs.plan.outputs.models) }}
+    env:
+      UV_LINK_MODE: copy
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      DOTSOCR_BASE_URL: ${{ secrets.DOTSOCR_BASE_URL }}
+      DOTSOCR_API_KEY: ${{ secrets.DOTSOCR_API_KEY }}
+      OVISOCR2_BASE_URL: ${{ secrets.OVISOCR2_BASE_URL }}
+      OVISOCR2_API_KEY: ${{ secrets.OVISOCR2_API_KEY }}
+      PADDLEOCR_VL_BASE_URL: ${{ secrets.PADDLEOCR_VL_BASE_URL }}
+      PADDLEOCR_VL_API_KEY: ${{ secrets.PADDLEOCR_VL_API_KEY }}
+      PADDLE_PIPELINE_URL: ${{ secrets.PADDLE_PIPELINE_URL }}
+      TELEOCR_BASE_URL: ${{ secrets.TELEOCR_BASE_URL }}
+      TELEOCR_API_KEY: ${{ secrets.TELEOCR_API_KEY }}
+      TYPHOON_BASE_URL: ${{ secrets.TYPHOON_BASE_URL }}
+      TYPHOON_API_KEY: ${{ secrets.TYPHOON_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      # A non-zero exit from the smoke check fails this job and therefore the run.
+      - name: Smoke ${{ matrix.model }}
+        env:
+          MODEL: ${{ matrix.model }}
+        run: uv run ocrbench runpod smoke "$MODEL"
