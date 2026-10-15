@@ -1,0 +1,70 @@
+# Parity gate sample list (design D6). Sample ids only, all `clean`, drawn from the
+# manifest of run 2026-09-22-a. No statement (bankstmt) pages, ever.
+version: 1
+run_id: 2026-09-22-a
+samples:
+  ocr_fullpage:
+    - TOB-fullpage-014D854C
+    - TOB-fullpage-0159AF30
+    - TOB-fullpage-029FB169
+    - TOB-fullpage-038EB8BB
+    - TOB-fullpage-03C27426
+    - TOB-fullpage-048AEF1B
+    - TOB-fullpage-05D1D2E1
+    - TOB-fullpage-071FCCDD
+    - TOB-fullpage-08A1628F
+    - TOB-fullpage-0B0966A3
+    - TOB-fullpage-0B5CA667
+    - TOB-fullpage-0DA0AFA7
+    - TOB-fullpage-0DCB6501
+    - TOB-fullpage-0F91D89A
+    - TOB-fullpage-12BA4B2A
+    - TOB-fullpage-145E6018
+    - TOB-fullpage-149C5D04
+    - TOB-fullpage-15269AA2
+    - TOB-fullpage-1576920D
+    - TOB-fullpage-17773401
+  ocr_line:
+    - TOB-finegrained-00DA177F
+    - TOB-finegrained-01359BA8
+    - TOB-finegrained-0276BD3F
+    - TOB-finegrained-03825B36
+    - TOB-finegrained-05391BE5
+    - TOB-finegrained-0761F90F
+    - TOB-finegrained-08E9A88F
+    - TOB-finegrained-09815CFC
+    - TOB-finegrained-0A6614F0
+    - TOB-finegrained-0D216D43
+  table:
+    - TOB-table-01C67FA6
+    - TOB-table-03F62D14
+    - TOB-table-04B50E38
+    - TOB-table-05D98975
+    - TOB-table-06D68BB7
+    - TOB-table-09FC822F
+    - TOB-table-0B4BBF41
+    - TOB-table-0C859E11
+    - TOB-table-0CC80CB5
+    - TOB-table-0D93E6B2
+  handwriting:
+    - TOB-handwriting-032450D5
+    - TOB-handwriting-0374539D
+    - TOB-handwriting-057F8382
+    - TOB-handwriting-05DC86BC
+    - TOB-handwriting-08AA80E9
+    - TOB-handwriting-09C5BF2F
+    - TOB-handwriting-0A953D11
+    - TOB-handwriting-0B44BDA5
+    - TOB-handwriting-0BD65B2F
+    - TOB-handwriting-0CA2D5AF
+  kie:
+    - TOB-kie-00D88E3A
+    - TOB-kie-013FB45F
+    - TOB-kie-02A4F86E
+    - TOB-kie-0563A706
+    - TOB-kie-085C78EB
+    - TOB-kie-0A3E251A
+    - TOB-kie-0D6EB6D7
+    - TOB-kie-11FB6C0F
+    - TOB-kie-12025C4A
+    - TOB-kie-170F064C
