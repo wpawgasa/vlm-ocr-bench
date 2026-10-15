@@ -35,10 +35,15 @@ def latest(model: str, path: Path | None = None) -> dict[str, Any] | None:
     return None
 
 
-def append(record: dict[str, Any], path: Path | None = None) -> None:
-    """Append a record; raise ReleaseRecordError if any string in it looks like a secret."""
+def check(record: dict[str, Any]) -> None:
+    """Raise ReleaseRecordError if any string in the record looks like a secret."""
     if _SECRET.search(yaml.safe_dump(record, allow_unicode=True)):
         raise ReleaseRecordError("release record contains an API key or endpoint id")
+
+
+def append(record: dict[str, Any], path: Path | None = None) -> None:
+    """Append a record; raise ReleaseRecordError if any string in it looks like a secret."""
+    check(record)
     path = Path(path or DEFAULT_PATH)
     records = [*load_releases(path), record]
     path.parent.mkdir(parents=True, exist_ok=True)

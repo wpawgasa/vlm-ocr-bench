@@ -23,6 +23,12 @@ def load_state(path: Path | None = None) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+def save_state(state: dict[str, Any], path: Path | None = None) -> None:
+    path = Path(path or DEFAULT_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(state, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
 def endpoint_for_host(host: str, path: Path | None = None) -> tuple[str, dict[str, Any]] | None:
     """`(endpoint name, entry)` for a `<id>.api.runpod.ai` host, or None if it is unknown."""
     if not host.endswith(HOST_SUFFIX):
