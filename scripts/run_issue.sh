@@ -215,6 +215,146 @@ implement_issue() {
   return 1
 }
 
+# write_pr_body FILE — the agent's PR body plus the Claude Code footer.
+write_pr_body() {
+  local footer='🤖 Generated with [Claude Code](https://claude.com/claude-code)'
+  {
+    cat "$ISSUE_WT/.run_issue/PR_BODY.md"
+    grep -qF "$footer" "$ISSUE_WT/.run_issue/PR_BODY.md" || printf '\n\n%s\n' "$footer"
+  } >"$1"
+}
+
+# wait_for_checks PR SHA — wait until the PR's head is SHA and at least one check
+# is reported for it. Returns 1 after CHECKS_WAIT_SECS without that.
+wait_for_checks() {
+  local pr=$1 sha=$2 waited=0 head count
+  while ((waited <= CHECKS_WAIT_SECS)); do
+    head=$(gh pr view "$pr" -R "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null)
+    if [[ $head == "$sha" ]]; then
+      count=$(gh pr checks "$pr" -R "$REPO" --json name --jq length 2>/dev/null)
+      [[ $count =~ ^[0-9]+$ ]] || count=0
+      ((count == 0)) || return 0
+    fi
+    sleep "$CHECKS_POLL_SECS"
+    waited=$((waited + CHECKS_POLL_SECS))
+    ((CHECKS_POLL_SECS > 0)) || break
+  done
+  return 1
+}
+
+# failed_ci_log SHA — the last 200 lines of the newest failed run's log for SHA.
+failed_ci_log() {
+  local id
+  id=$(gh run list -R "$REPO" --commit "$1" --status failure --limit 1 \
+    --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null)
+  if [[ -n $id ]]; then
+    gh run view "$id" -R "$REPO" --log-failed 2>&1 | tail -n 200
+  else
+    echo "CI failed for $1, but no failed run log was found."
+  fi
+}
+
+# stop_pr N PR WHY — record a CI failure, leave the PR open and say why on it.
+stop_pr() {
+  local n=$1 pr=$2 why=$3
+  OUT_OUTCOME[$n]=ci-failed
+  log "#$n: $why; leaving $pr open"
+  gh pr comment "$pr" -R "$REPO" --body "scripts/run_issue.sh stopped: $why. \
+This PR was not merged; the worktree .claude/worktrees/issue-$n is kept for inspection." \
+    >>"$CURRENT_LOG" 2>&1 || true
+}
+
+# after_merge N PR — tick issue N in its parent's task list, comment the PR link
+# on the issue, and remove the worktree and local branch.
+after_merge() {
+  local n=$1 pr=$2 parent body_file
+  parent=$(gh api "repos/$REPO/issues/$n/parent" --jq .number 2>/dev/null)
+  if [[ $parent =~ ^[0-9]+$ ]]; then
+    body_file="$LOG_DIR/issue-$parent.body.md"
+    if gh issue view "$parent" -R "$REPO" --json body --jq .body >"$body_file" &&
+      tick_parent_line "$body_file" "$n"; then
+      gh issue edit "$parent" -R "$REPO" --body-file "$body_file" >>"$CURRENT_LOG" 2>&1 ||
+        log "#$n: could not tick the line in parent #$parent"
+    fi
+  fi
+  gh issue comment "$n" -R "$REPO" --body "Merged in $pr by scripts/run_issue.sh." \
+    >>"$CURRENT_LOG" 2>&1 || log "#$n: could not comment on the issue"
+  git -C "$ROOT" worktree remove --force "$ISSUE_WT" >>"$CURRENT_LOG" 2>&1 || true
+  git -C "$ROOT" branch -D "$ISSUE_BRANCH" >>"$CURRENT_LOG" 2>&1 || true
+}
+
+# ship_issue N TITLE — push, open or reuse the PR, wait for CI, run up to
+# MAX_CI_FIXES fix rounds, and squash-merge when CI passes. Returns 1 when the
+# run must halt.
+ship_issue() {
+  local n=$1 title=$2 pr sha body_file fixes=0 failure="" kind prompt status
+  body_file="$LOG_DIR/issue-$n.pr-body.md"
+  write_pr_body "$body_file"
+  git -C "$ISSUE_WT" push -q -u origin "$ISSUE_BRANCH" >>"$CURRENT_LOG" 2>&1 || {
+    log "#$n: git push failed"
+    return 1
+  }
+  pr=$(gh pr list -R "$REPO" --head "$ISSUE_BRANCH" --state open --json url \
+    --jq '.[0].url // empty' 2>/dev/null)
+  if [[ -n $pr ]]; then
+    log "#$n: reusing $pr"
+    gh pr edit "$pr" -R "$REPO" --body-file "$body_file" >>"$CURRENT_LOG" 2>&1
+  elif ! pr=$(gh pr create -R "$REPO" --base "$BASE" --head "$ISSUE_BRANCH" \
+    --title "$(strip_tier "$title") (#$n)" --body-file "$body_file") || [[ -z $pr ]]; then
+    log "#$n: gh pr create failed"
+    return 1
+  fi
+  pr=$(tail -n 1 <<<"$pr")
+  OUT_PR[$n]=$pr
+
+  while true; do
+    if [[ -z $failure ]]; then
+      sha=$(git -C "$ISSUE_WT" rev-parse HEAD)
+      if ! wait_for_checks "$pr" "$sha"; then
+        stop_pr "$n" "$pr" "no CI checks reported for $sha within ${CHECKS_WAIT_SECS}s"
+        return 1
+      fi
+      if gh pr checks "$pr" -R "$REPO" --watch --fail-fast >>"$CURRENT_LOG" 2>&1; then
+        if ! gh pr merge "$pr" -R "$REPO" --squash --delete-branch >>"$CURRENT_LOG" 2>&1; then
+          stop_pr "$n" "$pr" "CI passed but gh pr merge failed"
+          return 1
+        fi
+        OUT_OUTCOME[$n]=merged
+        log "#$n: merged $pr"
+        after_merge "$n" "$pr"
+        return 0
+      fi
+      failure=$(failed_ci_log "$sha")
+      kind="on CI (GitHub Actions)"
+    fi
+    if ((fixes >= MAX_CI_FIXES)); then
+      stop_pr "$n" "$pr" "CI still failing after $fixes fix round(s)"
+      return 1
+    fi
+    fixes=$((fixes + 1))
+    log "#$n: failed $kind; fix round $fixes/$MAX_CI_FIXES on $ISSUE_MODEL"
+    prompt=$(render_template "$RUN_ISSUE_DIR/fix.md" "ISSUE_NUMBER=$n" \
+      "ISSUE_TITLE=$title" "FAILURE_KIND=$kind" \
+      "TRAILER=$(commit_trailer "$ISSUE_MODEL")" "FAILURE_LOG=$failure")
+    run_claude "$n" ci-fix "$ISSUE_WT" "$ISSUE_MODEL" "$prompt" "${IMPL_TOOLS[@]}"
+    status=$(result_status "$CLAUDE_RESULT")
+    if [[ $status == blocked* ]]; then
+      stop_pr "$n" "$pr" "the agent reported $status"
+      return 1
+    fi
+    if failure=$(post_checks "$n" "$status"); then
+      write_pr_body "$body_file"
+      git -C "$ISSUE_WT" push -q origin "$ISSUE_BRANCH" >>"$CURRENT_LOG" 2>&1 || {
+        stop_pr "$n" "$pr" "git push of the fix failed"
+        return 1
+      }
+      gh pr edit "$pr" -R "$REPO" --body-file "$body_file" >>"$CURRENT_LOG" 2>&1
+    else
+      kind="local verification after a CI fix"
+    fi
+  done
+}
+
 # process_issue N — route, implement and ship one open issue. Returns 1 when the
 # run must halt.
 process_issue() {
@@ -242,7 +382,7 @@ process_issue() {
     return 0
   fi
   implement_issue "$n" "$title" "$body" "$model" "$reason" || return 1
-  OUT_OUTCOME[$n]=implemented
+  ship_issue "$n" "$title"
 }
 
 print_summary() {

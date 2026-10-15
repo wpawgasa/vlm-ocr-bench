@@ -689,8 +689,9 @@ def test_existing_non_worktree_directory_is_refused(sandbox: Fakes) -> None:
 def test_resume_after_retitle_adopts_existing_branch(sandbox: Fakes) -> None:
     add_issue(sandbox, 117, "x 1.1 [Sonnet]: old title")
     ship_ok(sandbox, 117)
-    first = run_runner(sandbox, "--issues", "117")
-    assert first.returncode == 0, first.stderr
+    sandbox.gh(rf"^pr checks \S+/pull/117 -R {REPO} --watch", {"exit": 1}, first=True)
+    first = run_runner(sandbox, "--issues", "117", "--max-ci-fixes", "0")
+    assert first.returncode == 1  # CI red: the worktree is kept for the resume
     sandbox.reset()
     sandbox.scenario["gh"] = []
     sandbox._save()
@@ -702,3 +703,142 @@ def test_resume_after_retitle_adopts_existing_branch(sandbox: Fakes) -> None:
     assert result.returncode == 0, result.stderr
     assert not claude_calls(sandbox, "implement")
     assert "issue/117-x-1-1-old-title" in result.stderr + result.stdout
+
+
+# --- end to end: ship phase --------------------------------------------------
+
+
+def origin_has_branch(sandbox: Fakes, n: int) -> bool:
+    refs = subprocess.run(
+        [
+            "git",
+            f"--git-dir={sandbox.origin}",
+            "for-each-ref",
+            "--format=%(refname)",
+            f"refs/heads/issue/{n}-*",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return bool(refs.strip())
+
+
+def test_happy_path_expands_group_and_merges(sandbox: Fakes) -> None:
+    parent_body = "### Tasks\n- [ ] 1.1 [Sonnet] loader (#117)\n- [ ] 1.2 [Sonnet] configs (#118)\n"
+    add_issue(
+        sandbox,
+        116,
+        "runpod-serving R1: group",
+        body=parent_body,
+        subs=[(117, "open"), (118, "closed")],
+    )
+    add_issue(sandbox, 117, "runpod-serving 1.1 [Sonnet]: config loader", parent=116)
+
+    ship_ok(sandbox, 117)
+
+    result = run_runner(sandbox, "--issues", "116")
+
+    assert result.returncode == 0, result.stderr
+    assert origin_has_branch(sandbox, 117)
+    (create,) = sandbox.gh_calls("pr create")
+    assert arg_after(create["argv"], "--title") == "runpod-serving 1.1: config loader (#117)"
+    assert arg_after(create["argv"], "--base") == "main"
+    assert "## In plain words" in create["body"]
+    assert "Generated with [Claude Code](https://claude.com/claude-code)" in create["body"]
+    (merge,) = sandbox.gh_calls("pr merge")
+    assert merge["argv"][3:] == ["-R", REPO, "--squash", "--delete-branch"]
+    (edit,) = sandbox.gh_calls("issue edit 116")
+    assert "- [x] 1.1 [Sonnet] loader (#117)" in edit["body"]
+    assert "- [ ] 1.2 [Sonnet] configs (#118)" in edit["body"]
+    assert sandbox.gh_calls("issue comment 117")
+    assert not (sandbox.work / ".claude" / "worktrees" / "issue-117").exists()
+    summary = result.stdout[result.stdout.index("ISSUE") :]
+    assert "merged" in summary and f"https://github.com/{REPO}/pull/117" in summary
+    assert "0.2500" in summary
+
+
+def test_ci_failure_gets_one_fix_then_merges(sandbox: Fakes) -> None:
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: y")
+    ship_ok(sandbox, 117)
+    sandbox.gh(rf"^pr checks \S+/pull/117 -R {REPO} --watch", {"exit": 1}, {"exit": 0}, first=True)
+    sandbox.gh(r"^run list .*--commit", "555\n")
+    sandbox.gh(r"^run view 555", "FAILED tests/test_x.py::test_y - assert 1 == 2\n")
+    sandbox.claude("fix", {"commit": "test", "pr_body": True})
+
+    result = run_runner(sandbox, "--issues", "117")
+
+    assert result.returncode == 0, result.stderr
+    (fix,) = claude_calls(sandbox, "fix")
+    assert "FAILED tests/test_x.py::test_y" in fix["prompt"]
+    assert "CI (GitHub Actions)" in fix["prompt"]
+    assert arg_after(fix["argv"], "--model") == "sonnet"
+    assert len(sandbox.gh_calls("pr merge")) == 1
+    assert sandbox.gh_calls("pr edit")
+
+
+def test_ci_failures_exhaust_fix_rounds_and_halt(sandbox: Fakes) -> None:
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: y")
+    add_issue(sandbox, 118, "x 1.2 [Sonnet]: z")
+    ship_ok(sandbox, 117)
+    sandbox.gh(rf"^pr checks \S+/pull/117 -R {REPO} --watch", {"exit": 1}, first=True)
+    sandbox.gh(r"^run list .*--commit", "555\n")
+    sandbox.gh(r"^run view 555", "boom\n")
+    sandbox.claude("fix", {"commit": "test", "pr_body": True})
+
+    result = run_runner(sandbox, "--issues", "117,118", "--max-ci-fixes", "1")
+
+    assert result.returncode == 1
+    assert len(claude_calls(sandbox, "fix")) == 1
+    assert not sandbox.gh_calls("pr merge")
+    (comment,) = sandbox.gh_calls("pr comment")
+    assert "not merged" in " ".join(comment["argv"])
+    assert "ci-failed" in result.stdout
+    assert not (sandbox.work / ".claude" / "worktrees" / "issue-118").exists()
+
+
+def test_no_checks_never_merges(sandbox: Fakes) -> None:
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: y")
+    ship_ok(sandbox, 117)
+    sandbox.gh(rf"^pr checks \S+/pull/117 -R {REPO} --json", "0\n", first=True)
+
+    result = run_runner(sandbox, "--issues", "117")
+
+    assert result.returncode == 1
+    assert not sandbox.gh_calls("pr merge")
+    assert "no CI checks" in result.stderr
+
+
+def test_head_sha_mismatch_never_merges(sandbox: Fakes) -> None:
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: y")
+    ship_ok(sandbox, 117)
+    sandbox.gh(r"^pr view \S+/pull/117 .*headRefOid", "deadbeef\n", first=True)
+
+    result = run_runner(sandbox, "--issues", "117")
+
+    assert result.returncode == 1
+    assert not sandbox.gh_calls("pr merge")
+    assert not sandbox.gh_calls("pr checks https://github.com/o/r/pull/117 -R o/r --watch")
+
+
+def test_rerun_reuses_worktree_and_pr(sandbox: Fakes) -> None:
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: y")
+    ship_ok(sandbox, 117)
+    sandbox.gh(rf"^pr checks \S+/pull/117 -R {REPO} --watch", {"exit": 1}, first=True)
+    assert run_runner(sandbox, "--issues", "117", "--max-ci-fixes", "0").returncode == 1
+
+    sandbox.reset()
+    sandbox.scenario["gh"].pop(0)  # CI is green now
+    sandbox.gh(
+        rf"^pr list -R {REPO} --head issue/117-",
+        f"https://github.com/{REPO}/pull/117\n",
+        first=True,
+    )
+
+    result = run_runner(sandbox, "--issues", "117")
+
+    assert result.returncode == 0, result.stderr
+    assert not claude_calls(sandbox)
+    assert not sandbox.gh_calls("pr create")
+    assert sandbox.gh_calls("pr edit")
+    assert len(sandbox.gh_calls("pr merge")) == 1
