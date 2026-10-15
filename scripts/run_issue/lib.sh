@@ -92,7 +92,7 @@ result_status() {
   local line
   line=$(grep -E '^RESULT: ' <<<"$1" | tail -n 1 || true)
   case $line in
-    "RESULT: done"*) echo done ;;
+    "RESULT: done"*) echo "done" ;;
     "RESULT: blocked"*) echo "blocked${line#RESULT: blocked}" ;;
     *) echo missing ;;
   esac

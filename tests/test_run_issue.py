@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -861,3 +862,18 @@ def test_rerun_reuses_worktree_and_pr(sandbox: Fakes) -> None:
     assert not sandbox.gh_calls("pr create")
     assert sandbox.gh_calls("pr edit")
     assert len(sandbox.gh_calls("pr merge")) == 1
+
+
+# --- lint --------------------------------------------------------------------
+
+
+@pytest.mark.skipif(shutil.which("shellcheck") is None, reason="shellcheck not installed")
+def test_shellcheck_clean() -> None:
+    result = subprocess.run(
+        ["shellcheck", "-x", "scripts/run_issue.sh", "scripts/run_issue/lib.sh"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout

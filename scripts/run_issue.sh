@@ -112,7 +112,7 @@ route_issue() {
 # the PR body, and lint plus tests pass in the worktree.
 post_checks() {
   local status=$2 out dirty
-  if [[ $status != done ]]; then
+  if [[ $status != "done" ]]; then
     echo "The agent did not end with 'RESULT: done' (got: $status)."
     return 1
   fi
@@ -179,7 +179,7 @@ implement_issue() {
     log "#$n: uv sync failed"
     return 1
   }
-  if ((reused)) && post_checks "$n" done >/dev/null; then
+  if ((reused)) && post_checks "$n" "done" >/dev/null; then
     log "#$n: reusing $ISSUE_BRANCH, which already passes the checks"
     return 0
   fi
