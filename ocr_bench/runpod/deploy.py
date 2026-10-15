@@ -208,6 +208,11 @@ def deploy(
     state = runpod_state.load_state(state_path)
     entry = dict((state.get("endpoints") or {}).get(name) or {})
     bare = check_config(cfg, digest, allowed_data_centers, entry)
+    if profile == "office" and not entry.get("client_data"):
+        raise DeployRefused(
+            f"{cfg.model}: the office profile is only for a promoted endpoint; "
+            "promote it first (deploy --promote)"
+        )
     record = {
         "model": cfg.model,
         "action": "deploy",
