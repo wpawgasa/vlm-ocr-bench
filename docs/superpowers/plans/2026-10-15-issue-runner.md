@@ -206,7 +206,10 @@ def test_result_status(text: str, status: str) -> None:
     [
         ('Thinking...\n{"tier": "Opus", "reason": "crosses modules"}', "Opus\tcrosses modules"),
         ('{"tier": "sonnet", "reason": "routine\\ttests"}', "Sonnet\troutine tests"),
-        ('{"tier": "Haiku", "reason": "cheap"}', "Sonnet\trouting output unparseable; model-routing default"),
+        (
+            '{"tier": "Haiku", "reason": "cheap"}',
+            "Sonnet\trouting output unparseable; model-routing default",
+        ),
         ("no json at all", "Sonnet\trouting output unparseable; model-routing default"),
     ],
 )
@@ -722,8 +725,7 @@ class Fakes:
     def _rule(self, tool: str, match: str, responses: tuple, first: bool) -> None:
         rule = {
             "match": match,
-            "responses": [r if isinstance(r, dict) else {"stdout": r} for r in responses]
-            or [{}],
+            "responses": [r if isinstance(r, dict) else {"stdout": r} for r in responses] or [{}],
         }
         if first:
             self.scenario[tool].insert(0, rule)
@@ -903,7 +905,15 @@ Append to `tests/test_run_issue.py`:
 # --- templates and allowlist -------------------------------------------------
 
 TEMPLATE_KEYS = {
-    "implement.md": ["REPO", "BASE", "ISSUE_NUMBER", "ISSUE_TITLE", "ROUTING", "TRAILER", "ISSUE_BODY"],
+    "implement.md": [
+        "REPO",
+        "BASE",
+        "ISSUE_NUMBER",
+        "ISSUE_TITLE",
+        "ROUTING",
+        "TRAILER",
+        "ISSUE_BODY",
+    ],
     "fix.md": ["ISSUE_NUMBER", "ISSUE_TITLE", "FAILURE_KIND", "TRAILER", "FAILURE_LOG"],
     "route.md": ["ISSUE_NUMBER", "ISSUE_TITLE", "ISSUE_BODY"],
 }
@@ -925,7 +935,7 @@ def test_implement_prompt_requires_superpowers_tests_and_pr_body() -> None:
         "superpowers:test-driven-development",
         "superpowers:systematic-debugging",
         "superpowers:verification-before-completion",
-        "uv run pytest -m \"not live\"",
+        'uv run pytest -m "not live"',
         ".run_issue/PR_BODY.md",
         "## Summary",
         "## Implementation details",
@@ -1203,7 +1213,14 @@ def arg_after(argv: list[str], flag: str) -> str:
 
 @pytest.mark.parametrize(
     "args",
-    [[], ["--issues", "abc"], ["--issues", "1,"], ["--issues", "1", "--max-ci-fixes", "x"], ["--bogus"], ["--issues"]],
+    [
+        [],
+        ["--issues", "abc"],
+        ["--issues", "1,"],
+        ["--issues", "1", "--max-ci-fixes", "x"],
+        ["--bogus"],
+        ["--issues"],
+    ],
 )
 def test_usage_errors_exit_2(sandbox: Fakes, args: list[str]) -> None:
     result = run_runner(sandbox, *args)
@@ -1219,7 +1236,12 @@ def test_unauthenticated_gh_exits_2(sandbox: Fakes) -> None:
 
 
 def test_dry_run_plans_routes_and_skips(sandbox: Fakes) -> None:
-    add_issue(sandbox, 116, "runpod-serving R1: group", subs=[(117, "open"), (118, "closed"), (119, "open")])
+    add_issue(
+        sandbox,
+        116,
+        "runpod-serving R1: group",
+        subs=[(117, "open"), (118, "closed"), (119, "open")],
+    )
     add_issue(sandbox, 117, "runpod-serving 1.1 [Sonnet]: config loader")
     add_issue(sandbox, 118, "runpod-serving 1.2 [Sonnet]: configs")
     add_issue(sandbox, 119, "Untagged parity set")
@@ -1231,7 +1253,7 @@ def test_dry_run_plans_routes_and_skips(sandbox: Fakes) -> None:
     assert result.returncode == 0, result.stderr
     assert "-> sonnet (tier tag [Sonnet] on the issue)" in result.stdout
     assert "-> opus (model-routing skill: crosses modules)" in result.stdout
-    summary = result.stdout[result.stdout.index("ISSUE"):]
+    summary = result.stdout[result.stdout.index("ISSUE") :]
     assert "#117" in summary and "planned" in summary
     assert "#118" in summary and "skipped-closed" in summary
     assert "#120" in summary and "skipped-human" in summary
@@ -1249,7 +1271,13 @@ def test_dry_run_plans_routes_and_skips(sandbox: Fakes) -> None:
 
 @pytest.mark.parametrize(
     ("flags", "expected"),
-    [([], "-> opus (tier tag [Fable] on the issue; Fable downgraded to Opus (no --allow-fable))"), (["--allow-fable"], "-> fable")],
+    [
+        (
+            [],
+            "-> opus (tier tag [Fable] on the issue; Fable downgraded to Opus (no --allow-fable))",
+        ),
+        (["--allow-fable"], "-> fable"),
+    ],
 )
 def test_fable_gate(sandbox: Fakes, flags: list[str], expected: str) -> None:
     add_issue(sandbox, 5, "spec 0.1 [Fable]: draft design")
@@ -1551,7 +1579,10 @@ def test_blocked_agent_halts_without_fix_rounds(sandbox: Fakes) -> None:
         ({"commit": "test", "pr_body": True, "dirty": True}, "Uncommitted changes"),
         ({"commit": "test"}, "PR body file missing"),
         ({"pr_body": True}, "No commits on the branch"),
-        ({"commit": "test", "pr_body": True, "result": "I think it is fine."}, "did not end with 'RESULT: done'"),
+        (
+            {"commit": "test", "pr_body": True, "result": "I think it is fine."},
+            "did not end with 'RESULT: done'",
+        ),
     ],
 )
 def test_failed_post_check_sends_fix_prompt(
@@ -1570,7 +1601,9 @@ def test_failed_post_check_sends_fix_prompt(
     assert "local verification" in fixes[0]["prompt"]
 
 
-@pytest.mark.parametrize(("tier", "fix_models"), [("Sonnet", ["sonnet", "opus"]), ("Opus", ["opus"])])
+@pytest.mark.parametrize(
+    ("tier", "fix_models"), [("Sonnet", ["sonnet", "opus"]), ("Opus", ["opus"])]
+)
 def test_local_verification_failure_escalates_then_halts(
     sandbox: Fakes, tier: str, fix_models: list[str]
 ) -> None:
@@ -1763,15 +1796,29 @@ Append:
 
 def origin_has_branch(sandbox: Fakes, n: int) -> bool:
     refs = subprocess.run(
-        ["git", f"--git-dir={sandbox.origin}", "for-each-ref", "--format=%(refname)", f"refs/heads/issue/{n}-*"],
-        capture_output=True, text=True, check=True,
+        [
+            "git",
+            f"--git-dir={sandbox.origin}",
+            "for-each-ref",
+            "--format=%(refname)",
+            f"refs/heads/issue/{n}-*",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     return bool(refs.strip())
 
 
 def test_happy_path_expands_group_and_merges(sandbox: Fakes) -> None:
     parent_body = "### Tasks\n- [ ] 1.1 [Sonnet] loader (#117)\n- [ ] 1.2 [Sonnet] configs (#118)\n"
-    add_issue(sandbox, 116, "runpod-serving R1: group", body=parent_body, subs=[(117, "open"), (118, "closed")])
+    add_issue(
+        sandbox,
+        116,
+        "runpod-serving R1: group",
+        body=parent_body,
+        subs=[(117, "open"), (118, "closed")],
+    )
     add_issue(sandbox, 117, "runpod-serving 1.1 [Sonnet]: config loader", parent=116)
 
     ship_ok(sandbox, 117)
@@ -1792,7 +1839,7 @@ def test_happy_path_expands_group_and_merges(sandbox: Fakes) -> None:
     assert "- [ ] 1.2 [Sonnet] configs (#118)" in edit["body"]
     assert sandbox.gh_calls("issue comment 117")
     assert not (sandbox.work / ".claude" / "worktrees" / "issue-117").exists()
-    summary = result.stdout[result.stdout.index("ISSUE"):]
+    summary = result.stdout[result.stdout.index("ISSUE") :]
     assert "merged" in summary and f"https://github.com/{REPO}/pull/117" in summary
     assert "0.2500" in summary
 
@@ -1868,7 +1915,11 @@ def test_rerun_reuses_worktree_and_pr(sandbox: Fakes) -> None:
 
     sandbox.reset()
     sandbox.scenario["gh"].pop(0)  # CI is green now
-    sandbox.gh(rf"^pr list -R {REPO} --head issue/117-", f"https://github.com/{REPO}/pull/117\n", first=True)
+    sandbox.gh(
+        rf"^pr list -R {REPO} --head issue/117-",
+        f"https://github.com/{REPO}/pull/117\n",
+        first=True,
+    )
 
     result = run_runner(sandbox, "--issues", "117")
 
