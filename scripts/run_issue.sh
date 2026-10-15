@@ -315,7 +315,8 @@ ship_issue() {
         return 1
       fi
       if gh pr checks "$pr" -R "$REPO" --watch --fail-fast >>"$CURRENT_LOG" 2>&1; then
-        if ! gh pr merge "$pr" -R "$REPO" --squash --delete-branch >>"$CURRENT_LOG" 2>&1; then
+        if ! gh pr merge "$pr" -R "$REPO" --squash --delete-branch \
+          --match-head-commit "$sha" >>"$CURRENT_LOG" 2>&1; then
           stop_pr "$n" "$pr" "CI passed but gh pr merge failed"
           return 1
         fi

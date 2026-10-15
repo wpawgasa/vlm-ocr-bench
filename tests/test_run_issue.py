@@ -747,7 +747,26 @@ def test_happy_path_expands_group_and_merges(sandbox: Fakes) -> None:
     assert "## In plain words" in create["body"]
     assert "Generated with [Claude Code](https://claude.com/claude-code)" in create["body"]
     (merge,) = sandbox.gh_calls("pr merge")
-    assert merge["argv"][3:] == ["-R", REPO, "--squash", "--delete-branch"]
+    pushed = subprocess.run(
+        [
+            "git",
+            f"--git-dir={sandbox.origin}",
+            "for-each-ref",
+            "--format=%(objectname)",
+            "refs/heads/issue/117-*",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert merge["argv"][3:] == [
+        "-R",
+        REPO,
+        "--squash",
+        "--delete-branch",
+        "--match-head-commit",
+        pushed,
+    ]
     (edit,) = sandbox.gh_calls("issue edit 116")
     assert "- [x] 1.1 [Sonnet] loader (#117)" in edit["body"]
     assert "- [ ] 1.2 [Sonnet] configs (#118)" in edit["body"]
