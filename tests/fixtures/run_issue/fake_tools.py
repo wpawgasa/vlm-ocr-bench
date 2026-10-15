@@ -12,8 +12,13 @@ scenario at $FAKE_SCENARIO:
 - "claude": {kind: [action, ...]}, kind taken from the prompt's
   "<!-- run_issue:KIND -->" marker. Action keys: "result" (final message, default
   "RESULT: done"), "commit" ("test" adds tests/test_fake_<k>.py, "code" adds
-  fake_<k>.py), "pr_body" (write .run_issue/PR_BODY.md), "dirty" (leave an
-  uncommitted file), "cost", "turns".
+  fake_<k>.py), "touch" (paths to write and commit), "delete" (paths to git rm and
+  commit), "pr_body" (write .run_issue/PR_BODY.md), "dirty" (leave an
+  uncommitted file), "sleep" (seconds to sleep before answering), "cost", "turns".
+
+Every claude call and every `uv run` call also logs "env": which of the
+credential variables in SECRETS are set, plus GH_CONFIG_DIR and the git settings
+the runner uses to disable credential helpers.
 
 Per-rule call counters live in $FAKE_STATE.
 """
@@ -25,7 +30,24 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+SECRETS = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "SSH_AUTH_SOCK",
+)
+ENV_VALUES = (
+    "GH_CONFIG_DIR",
+    "GIT_TERMINAL_PROMPT",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_VALUE_0",
+)
 
 PR_BODY = """## Summary
 Fake change.
@@ -42,6 +64,17 @@ pytest passed.
 ## Routing
 sonnet
 """
+
+
+def _env() -> dict:
+    """Which credential variables are set, and the values of ENV_VALUES."""
+    env: dict = {name: name in os.environ for name in SECRETS}
+    env.update({name: os.environ.get(name) for name in ENV_VALUES})
+    return env
+
+
+def _git(*args: str) -> None:
+    subprocess.run(["git", *args], check=True)
 
 
 def _next(key: str, items: list[dict]) -> dict:
@@ -62,6 +95,8 @@ def _log(entry: dict) -> int:
 
 def _rules(tool: str, argv: list[str], scenario: dict) -> int:
     entry: dict = {"tool": tool, "argv": argv, "cwd": os.getcwd()}
+    if tool == "uv" and argv[:1] == ["run"]:
+        entry["env"] = _env()
     if "--body-file" in argv:
         body_path = Path(argv[argv.index("--body-file") + 1])
         entry["body"] = body_path.read_text(encoding="utf-8")
@@ -94,17 +129,31 @@ def _claude(argv: list[str], scenario: dict) -> int:
             "api_key_set": any(
                 k in os.environ for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
             ),
+            "env": _env(),
         }
     )
     action = _next(f"claude:{kind}", scenario.get("claude", {}).get(kind, [{}]))
+    time.sleep(action.get("sleep", 0))
     cwd = Path.cwd()
     commit = action.get("commit")
     if commit:
-        name = f"tests/test_fake_{serial}.py" if commit == "test" else f"fake_{serial}.py"
+        pattern = "tests/test_fake_{}.py" if commit == "test" else "fake_{}.py"
+        k = serial
+        while (cwd / pattern.format(k)).exists():  # the log restarts after reset()
+            k += 1
+        name = pattern.format(k)
         (cwd / name).parent.mkdir(parents=True, exist_ok=True)
         (cwd / name).write_text("def test_fake():\n    assert True\n")
-        subprocess.run(["git", "add", name], check=True)
-        subprocess.run(["git", "commit", "-qm", f"fake commit {serial}"], check=True)
+        _git("add", name)
+        _git("commit", "-qm", f"fake commit {serial}")
+    for name in action.get("touch", []):
+        (cwd / name).parent.mkdir(parents=True, exist_ok=True)
+        (cwd / name).write_text(f"touched by fake claude {serial}\n")
+        _git("add", name)
+        _git("commit", "-qm", f"fake touch {serial}")
+    for name in action.get("delete", []):
+        _git("rm", "-q", name)
+        _git("commit", "-qm", f"fake delete {serial}")
     if action.get("pr_body"):
         (cwd / ".run_issue").mkdir(exist_ok=True)
         (cwd / ".run_issue" / "PR_BODY.md").write_text(PR_BODY)

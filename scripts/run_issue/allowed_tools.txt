@@ -1,6 +1,13 @@
 # Tools the implementing agent may use without a prompt (claude --allowedTools).
-# Deliberately absent: git push, gh pr, gh api, curl/wget. The runner pushes,
-# opens the PR and merges itself.
+# This list only pre-approves tools; it is not a sandbox. `uv run` alone can run
+# arbitrary code, so the agent can do anything the user account can do with what
+# is in its environment. The real protection is elsewhere in the runner:
+# credentials are scrubbed from the agent's environment (no API keys, gh tokens,
+# gh config, SSH agent or git credential helpers), the runner itself pushes,
+# opens the PR and merges, and post-checks fail the issue when the branch touches
+# a protected path (protected_paths.txt) or deletes tests. Scrubbing hides
+# credentials from tools, not from code that reads files such as ~/.config/gh or
+# ~/.ssh directly: run on a host whose stored credentials you can accept exposing.
 Read
 Edit
 Write
@@ -18,7 +25,6 @@ Bash(git status:*)
 Bash(git diff:*)
 Bash(git log:*)
 Bash(git show:*)
-Bash(gh issue view:*)
 Bash(openspec:*)
 Bash(ls:*)
 Bash(cat:*)

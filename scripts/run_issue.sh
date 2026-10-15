@@ -9,6 +9,18 @@
 # implement it with tests in its own worktree via `claude -p` on the subscription
 # login; re-verify locally; open a PR; watch CI and fix failures; squash-merge
 # when CI passes. The run stops at the first issue that cannot be merged.
+#
+# The agent and the local checks on its code run without credentials (API keys,
+# gh tokens and config, SSH agent, git credential helpers); the runner itself
+# pushes, opens the PR and merges.
+#
+# Environment:
+#   RUN_ISSUE_AGENT_TIMEOUT     seconds per claude call (default 3600); a call cut
+#                               off counts as an unfinished agent (fix round)
+#   RUN_ISSUE_CI_TIMEOUT        seconds to watch CI per push (default 3600); expiry
+#                               counts as a CI failure
+#   RUN_ISSUE_CHECKS_WAIT_SECS  seconds to wait for CI checks to appear (default 300)
+#   RUN_ISSUE_CHECKS_POLL_SECS  poll interval while waiting for checks (default 10)
 # Design: docs/superpowers/specs/2026-10-15-issue-runner-design.md
 set -uo pipefail
 
@@ -33,6 +45,8 @@ ISSUES="" ALLOW_FABLE=0 MAX_CI_FIXES=2 DRY_RUN=0
 REPO="wpawgasa/vlm-ocr-bench" BASE="main"
 CHECKS_WAIT_SECS=${RUN_ISSUE_CHECKS_WAIT_SECS:-300}
 CHECKS_POLL_SECS=${RUN_ISSUE_CHECKS_POLL_SECS:-10}
+AGENT_TIMEOUT=${RUN_ISSUE_AGENT_TIMEOUT:-3600}
+CI_TIMEOUT=${RUN_ISSUE_CI_TIMEOUT:-3600}
 
 while (($#)); do
   case $1 in
@@ -55,38 +69,53 @@ done
 
 [[ $ISSUES =~ ^[0-9]+(,[0-9]+)*$ ]] || die_usage "--issues needs comma-separated issue numbers"
 [[ $MAX_CI_FIXES =~ ^[0-9]+$ ]] || die_usage "--max-ci-fixes needs a non-negative integer"
-for tool in claude gh git uv python3; do
+for tool in claude gh git uv python3 timeout; do
   command -v "$tool" >/dev/null || die_usage "required tool not on PATH: $tool"
 done
 gh auth status >/dev/null 2>&1 || die_usage "gh is not authenticated (run: gh auth login)"
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || die_usage "run this inside the repository"
 
 mapfile -t IMPL_TOOLS < <(load_tools "$RUN_ISSUE_DIR/allowed_tools.txt")
-ROUTE_TOOLS=(Read Glob Grep Skill)
+# Permission flags per call; --allowedTools comes last (it is variadic).
+IMPL_FLAGS=(--permission-mode acceptEdits --allowedTools "${IMPL_TOOLS[@]}")
+ROUTE_FLAGS=(--permission-mode default --disallowedTools Edit Write NotebookEdit Bash
+  --allowedTools Read Glob Grep Skill)
+PROTECTED="$RUN_ISSUE_DIR/protected_paths.txt"
 LOG_DIR="$ROOT/.claude/worktrees/run-logs/$(date -u +%Y%m%dT%H%M%SZ)"
-mkdir -p "$LOG_DIR" || die_usage "cannot create $LOG_DIR"
+mkdir -p "$LOG_DIR/gh-config" || die_usage "cannot create $LOG_DIR"
+mapfile -t AGENT_ENV < <(agent_env "$LOG_DIR/gh-config")
 CURRENT_LOG="$LOG_DIR/run.log"
 CLAUDE_CALLS=0 CLAUDE_RESULT="" ROUTE_TIER="" ROUTE_REASON=""
 declare -A OUT_MODEL=() OUT_OUTCOME=() OUT_PR=() OUT_COST=() OUT_TURNS=()
 ORDER=()
 
-# run_claude N KIND CWD MODEL PROMPT TOOL... — one headless Claude Code call on
-# the subscription login (API-key variables removed). The prompt goes on stdin
-# because --allowedTools is variadic. Sets CLAUDE_RESULT to the final message and
-# adds the call's cost and turns to issue N's totals.
+# run_claude N KIND CWD MODEL PROMPT FLAG... — one headless Claude Code call with
+# the permission FLAGs, in the scrubbed agent environment (so on the subscription
+# login) and cut off after AGENT_TIMEOUT seconds. The prompt goes on stdin because
+# the tool-list flags are variadic. Sets CLAUDE_RESULT to the final message, adds
+# the call's cost and turns to issue N's totals and, for calls in the issue's
+# worktree, records the parsed result in $ISSUE_WT/.run_issue/STATUS.
 run_claude() {
-  local n=$1 kind=$2 cwd=$3 model=$4 prompt=$5 out
+  local n=$1 kind=$2 cwd=$3 model=$4 prompt=$5 out rc=0
   shift 5
   CLAUDE_CALLS=$((CLAUDE_CALLS + 1))
   out="$LOG_DIR/issue-$n.$CLAUDE_CALLS.$kind.json"
   log "#$n: claude $kind (--model $model)"
-  if ! (cd "$cwd" && printf '%s' "$prompt" |
-    env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
-      claude -p --model "$model" --permission-mode acceptEdits \
-      --output-format json --allowedTools "$@") >"$out" 2>>"$CURRENT_LOG"; then
+  (cd "$cwd" && printf '%s' "$prompt" |
+    timeout -k 30 "$AGENT_TIMEOUT" env "${AGENT_ENV[@]}" \
+      claude -p --model "$model" --output-format json "$@") >"$out" 2>>"$CURRENT_LOG" || rc=$?
+  if ((rc == 124 || rc == 137)); then
+    log "#$n: claude $kind timed out after ${AGENT_TIMEOUT}s (see $out)"
+  elif ((rc != 0)); then
     log "#$n: claude $kind exited non-zero (see $out)"
   fi
   CLAUDE_RESULT=$(json_field "$out" result)
+  if [[ $kind != route ]]; then
+    rm -f "$ISSUE_WT/.run_issue/STATUS"
+    { mkdir -p "$ISSUE_WT/.run_issue" &&
+      result_status "$CLAUDE_RESULT" >"$ISSUE_WT/.run_issue/STATUS"; } ||
+      log "#$n: cannot record the agent status in $ISSUE_WT/.run_issue/STATUS"
+  fi
   OUT_COST[$n]=$(add_num "${OUT_COST[$n]:-0}" "$(json_field "$out" total_cost_usd 0)")
   OUT_TURNS[$n]=$((${OUT_TURNS[$n]:-0} + $(json_field "$out" num_turns 0)))
 }
@@ -102,16 +131,17 @@ route_issue() {
   fi
   prompt=$(render_template "$RUN_ISSUE_DIR/route.md" \
     "ISSUE_NUMBER=$n" "ISSUE_TITLE=$title" "ISSUE_BODY=$body")
-  run_claude "$n" route "$ROOT" sonnet "$prompt" "${ROUTE_TOOLS[@]}"
+  run_claude "$n" route "$ROOT" sonnet "$prompt" "${ROUTE_FLAGS[@]}"
   IFS=$'\t' read -r ROUTE_TIER ROUTE_REASON < <(parse_route_result "$CLAUDE_RESULT")
   ROUTE_REASON="model-routing skill: $ROUTE_REASON"
 }
 
 # post_checks N STATUS — print why the agent's work on issue N is not ready and
-# return 1; return 0 when it finished, committed everything, changed tests, wrote
-# the PR body, and lint plus tests pass in the worktree.
+# return 1; return 0 when it finished, committed everything, wrote the PR body,
+# left protected paths and existing tests alone, added or changed tests, and lint
+# plus tests pass in the worktree (run in the scrubbed agent environment).
 post_checks() {
-  local status=$2 out dirty
+  local status=$2 out dirty names hits
   if [[ $status != "done" ]]; then
     echo "The agent did not end with 'RESULT: done' (got: $status)."
     return 1
@@ -126,12 +156,32 @@ post_checks() {
     return 1
   fi
   check_pr_body "$ISSUE_WT/.run_issue/PR_BODY.md" || return 1
-  if ! git -C "$ISSUE_WT" diff --name-only "origin/$BASE..HEAD" | grep -q '^tests/'; then
+  # Diffs are against the merge base (...), so commits that reached origin/$BASE
+  # after the branch point are not counted as the agent's changes.
+  names=$(git -C "$ISSUE_WT" diff --no-renames --name-only "origin/$BASE...HEAD") || {
+    echo "git diff against origin/$BASE failed."
+    return 1
+  }
+  hits=$(protected_hits "$PROTECTED" <<<"$names")
+  if [[ -n $hits ]]; then
+    echo "The branch changes protected paths (revert these changes; the runner owns them):" \
+      "${hits//$'\n'/ }"
+    return 1
+  fi
+  names=$(git -C "$ISSUE_WT" diff --no-renames --name-only --diff-filter=D \
+    "origin/$BASE...HEAD" -- tests/)
+  if [[ -n $names ]]; then
+    echo "Test files were deleted (restore them): ${names//$'\n'/ }"
+    return 1
+  fi
+  names=$(git -C "$ISSUE_WT" diff --no-renames --name-only --diff-filter=AM "origin/$BASE...HEAD")
+  if ! grep -q '^tests/' <<<"$names"; then
     echo "No files under tests/ changed: every task in the issue needs a test."
     return 1
   fi
-  if ! out=$(cd "$ISSUE_WT" && uv run ruff check . 2>&1 &&
-    uv run ruff format --check . 2>&1 && uv run pytest -m "not live" -q 2>&1); then
+  if ! out=$(cd "$ISSUE_WT" && env "${AGENT_ENV[@]}" uv run ruff check . 2>&1 &&
+    env "${AGENT_ENV[@]}" uv run ruff format --check . 2>&1 &&
+    env "${AGENT_ENV[@]}" uv run pytest -m "not live" -q 2>&1); then
     printf 'Local verification failed:\n%s\n' "$(tail -n 200 <<<"$out")"
     return 1
   fi
@@ -179,7 +229,9 @@ implement_issue() {
     log "#$n: uv sync failed"
     return 1
   }
-  if ((reused)) && post_checks "$n" "done" >/dev/null; then
+  # Resume shortcut: only when the last agent call on this worktree said done.
+  if ((reused)) && [[ $(cat "$ISSUE_WT/.run_issue/STATUS" 2>/dev/null) == "done" ]] &&
+    post_checks "$n" "done" >/dev/null; then
     log "#$n: reusing $ISSUE_BRANCH, which already passes the checks"
     return 0
   fi
@@ -187,7 +239,7 @@ implement_issue() {
   prompt=$(render_template "$RUN_ISSUE_DIR/implement.md" "REPO=$REPO" "BASE=$BASE" \
     "ISSUE_NUMBER=$n" "ISSUE_TITLE=$title" "ROUTING=$model ($reason)" \
     "TRAILER=$(commit_trailer "$model")" "ISSUE_BODY=$body")
-  run_claude "$n" implement "$ISSUE_WT" "$model" "$prompt" "${IMPL_TOOLS[@]}"
+  run_claude "$n" implement "$ISSUE_WT" "$model" "$prompt" "${IMPL_FLAGS[@]}"
 
   local -a fix_models=("$model")
   [[ $model != sonnet ]] || fix_models+=(opus)
@@ -208,19 +260,22 @@ implement_issue() {
     prompt=$(render_template "$RUN_ISSUE_DIR/fix.md" "ISSUE_NUMBER=$n" \
       "ISSUE_TITLE=$title" "FAILURE_KIND=local verification" \
       "TRAILER=$(commit_trailer "$m")" "FAILURE_LOG=$failure")
-    run_claude "$n" fix "$ISSUE_WT" "$m" "$prompt" "${IMPL_TOOLS[@]}"
+    run_claude "$n" fix "$ISSUE_WT" "$m" "$prompt" "${IMPL_FLAGS[@]}"
   done
   OUT_OUTCOME[$n]=blocked
   log "#$n: still failing after the fix rounds; worktree kept at $ISSUE_WT"
   return 1
 }
 
-# write_pr_body FILE — the agent's PR body plus the Claude Code footer.
+# write_pr_body FILE N — the agent's PR body plus "Closes #N" (so the squash
+# merge closes the issue) and the Claude Code footer, each added once.
 write_pr_body() {
+  local src="$ISSUE_WT/.run_issue/PR_BODY.md" n=$2
   local footer='🤖 Generated with [Claude Code](https://claude.com/claude-code)'
   {
-    cat "$ISSUE_WT/.run_issue/PR_BODY.md"
-    grep -qF "$footer" "$ISSUE_WT/.run_issue/PR_BODY.md" || printf '\n\n%s\n' "$footer"
+    cat "$src"
+    grep -qE "^Closes #$n([^0-9]|\$)" "$src" || printf '\nCloses #%s\n' "$n"
+    grep -qF "$footer" "$src" || printf '\n%s\n' "$footer"
   } >"$1"
 }
 
@@ -289,12 +344,12 @@ after_merge() {
 ship_issue() {
   local n=$1 title=$2 pr sha body_file fixes=0 failure="" kind prompt status
   body_file="$LOG_DIR/issue-$n.pr-body.md"
-  write_pr_body "$body_file"
+  write_pr_body "$body_file" "$n"
   git -C "$ISSUE_WT" push -q -u origin "$ISSUE_BRANCH" >>"$CURRENT_LOG" 2>&1 || {
     log "#$n: git push failed"
     return 1
   }
-  pr=$(gh pr list -R "$REPO" --head "$ISSUE_BRANCH" --state open --json url \
+  pr=$(gh pr list -R "$REPO" --base "$BASE" --head "$ISSUE_BRANCH" --state open --json url \
     --jq '.[0].url // empty' 2>/dev/null)
   if [[ -n $pr ]]; then
     log "#$n: reusing $pr"
@@ -314,7 +369,8 @@ ship_issue() {
         stop_pr "$n" "$pr" "no CI checks reported for $sha within ${CHECKS_WAIT_SECS}s"
         return 1
       fi
-      if gh pr checks "$pr" -R "$REPO" --watch --fail-fast >>"$CURRENT_LOG" 2>&1; then
+      if timeout "$CI_TIMEOUT" gh pr checks "$pr" -R "$REPO" --watch --fail-fast \
+        >>"$CURRENT_LOG" 2>&1; then
         if ! gh pr merge "$pr" -R "$REPO" --squash --delete-branch \
           --match-head-commit "$sha" >>"$CURRENT_LOG" 2>&1; then
           stop_pr "$n" "$pr" "CI passed but gh pr merge failed"
@@ -337,14 +393,14 @@ ship_issue() {
     prompt=$(render_template "$RUN_ISSUE_DIR/fix.md" "ISSUE_NUMBER=$n" \
       "ISSUE_TITLE=$title" "FAILURE_KIND=$kind" \
       "TRAILER=$(commit_trailer "$ISSUE_MODEL")" "FAILURE_LOG=$failure")
-    run_claude "$n" ci-fix "$ISSUE_WT" "$ISSUE_MODEL" "$prompt" "${IMPL_TOOLS[@]}"
+    run_claude "$n" ci-fix "$ISSUE_WT" "$ISSUE_MODEL" "$prompt" "${IMPL_FLAGS[@]}"
     status=$(result_status "$CLAUDE_RESULT")
     if [[ $status == blocked* ]]; then
       stop_pr "$n" "$pr" "the agent reported $status"
       return 1
     fi
     if failure=$(post_checks "$n" "$status"); then
-      write_pr_body "$body_file"
+      write_pr_body "$body_file" "$n"
       git -C "$ISSUE_WT" push -q origin "$ISSUE_BRANCH" >>"$CURRENT_LOG" 2>&1 || {
         stop_pr "$n" "$pr" "git push of the fix failed"
         return 1

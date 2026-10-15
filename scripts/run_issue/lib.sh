@@ -198,6 +198,45 @@ load_tools() {
   grep -vE '^[[:space:]]*(#|$)' "$1"
 }
 
+# protected_hits PREFIX_FILE — read file names on stdin; print each one that
+# starts with a prefix listed in PREFIX_FILE (one per line, comments allowed).
+protected_hits() {
+  local -a prefixes
+  local name prefix
+  mapfile -t prefixes < <(load_tools "$1")
+  while IFS= read -r name; do
+    for prefix in "${prefixes[@]}"; do
+      if [[ -n $name && $name == "$prefix"* ]]; then
+        printf '%s\n' "$name"
+        break
+      fi
+    done
+  done
+}
+
+# Credentials the agent and the checks run on its code must not see.
+AGENT_SECRETS=(
+  ANTHROPIC_API_KEY
+  ANTHROPIC_AUTH_TOKEN
+  GH_TOKEN
+  GITHUB_TOKEN
+  GH_ENTERPRISE_TOKEN
+  SSH_AUTH_SOCK
+)
+
+# agent_env GH_CONFIG_DIR — the `env` arguments, one per line, for running agent
+# code: credential variables unset (Claude then uses the subscription login), gh
+# pointed at the empty directory GH_CONFIG_DIR, git prompts and credential
+# helpers disabled. Use: mapfile -t ENV < <(agent_env DIR); env "${ENV[@]}" CMD.
+agent_env() {
+  local name
+  for name in "${AGENT_SECRETS[@]}"; do
+    printf -- '-u%s\n' "$name"
+  done
+  printf '%s\n' "GH_CONFIG_DIR=$1" GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
+}
+
 # issue_state REPO N — "open" or "closed" (empty when the issue cannot be read).
 issue_state() {
   gh issue view "$2" -R "$1" --json state --jq '.state | ascii_downcase' 2>/dev/null
