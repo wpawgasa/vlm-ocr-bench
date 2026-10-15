@@ -8,8 +8,10 @@ with a pointer to its tasks.md entry.
 
 import asyncio
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 import typer
 import yaml
@@ -40,6 +42,7 @@ from ocr_bench.models.probe import build_probe_report, probe_model, select_probe
 from ocr_bench.models.runner import infer_model, pending_rows, summarize
 from ocr_bench.models.vllm_client import EndpointUnavailable
 from ocr_bench.paths import MissingArtifactError, RunPaths, require
+from ocr_bench.runpod import releases
 from ocr_bench.schemas import (
     GROUND_TRUTH,
     Condition,
@@ -218,6 +221,12 @@ async def _server_versions(built: dict[str, OcrModel]) -> dict[str, str]:
     return versions
 
 
+def _endpoint_kind(cfg: ModelConfig) -> str:
+    """`runpod` when the endpoint host ends with api.runpod.ai, else `self_hosted`."""
+    host = urlparse(os.environ.get(cfg.endpoint_env, "")).hostname or ""
+    return "runpod" if host.endswith("api.runpod.ai") else "self_hosted"
+
+
 def _write_infer_config(
     rp: RunPaths,
     cfgs: dict[str, ModelConfig],
@@ -232,9 +241,16 @@ def _write_infer_config(
     snapshot["concurrency"] = concurrency
     snapshot.setdefault("models", {})
     for name, cfg in cfgs.items():
+        kind = _endpoint_kind(cfg)
+        version = (versions or {}).get(name, "unknown")
+        if version == "unknown" and kind == "runpod":
+            # /version is not reachable on every Runpod endpoint; use what was deployed.
+            release = releases.latest(name)
+            version = (release or {}).get("vllm_version") or version
         snapshot["models"][name] = {
             **cfg.model_dump(mode="json"),
-            "vllm_version": (versions or {}).get(name, "unknown"),
+            "endpoint_kind": kind,
+            "vllm_version": version,
         }
     rp.config_infer.write_text(
         yaml.safe_dump(snapshot, sort_keys=False, allow_unicode=True), encoding="utf-8"
