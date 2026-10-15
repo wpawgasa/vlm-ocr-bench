@@ -405,3 +405,139 @@ def test_allowlist_excludes_irreversible_commands() -> None:
     assert {"Read", "Edit", "Write", "Skill", "Bash(uv run:*)", "Bash(git commit:*)"} <= set(tools)
     for entry in tools:
         assert not entry.startswith(("Bash(git push", "Bash(gh pr", "Bash(gh api")), entry
+
+
+# --- end to end: sandbox -----------------------------------------------------
+
+
+@pytest.fixture
+def sandbox(tmp_path: Path, fakes: Fakes) -> Fakes:
+    """A work repo whose origin is a local bare repo, plus the fakes."""
+    origin, work = tmp_path / "origin.git", tmp_path / "work"
+    gitconfig = tmp_path / "gitconfig"
+    gitconfig.write_text("")
+    fakes.env.update(
+        GIT_CONFIG_GLOBAL=str(gitconfig),
+        GIT_CONFIG_NOSYSTEM="1",
+        GIT_AUTHOR_NAME="t",
+        GIT_AUTHOR_EMAIL="t@example.com",
+        GIT_COMMITTER_NAME="t",
+        GIT_COMMITTER_EMAIL="t@example.com",
+        RUN_ISSUE_CHECKS_WAIT_SECS="0",
+        RUN_ISSUE_CHECKS_POLL_SECS="0",
+        ANTHROPIC_API_KEY="sk-must-not-reach-claude",
+        FAKE_ORIGIN=str(origin),
+    )
+
+    def git(*args: str, cwd: Path = work) -> None:
+        subprocess.run(["git", *args], cwd=cwd, env=fakes.env, check=True, capture_output=True)
+
+    git("init", "-q", "--bare", "-b", "main", str(origin), cwd=tmp_path)
+    work.mkdir()
+    git("init", "-q", "-b", "main")
+    (work / "README.md").write_text("sandbox\n")
+    git("add", "README.md")
+    git("commit", "-qm", "init")
+    git("remote", "add", "origin", str(origin))
+    git("push", "-q", "-u", "origin", "main")
+    fakes.work, fakes.origin = work, origin
+    fakes.claude("implement", {"commit": "test", "pr_body": True})
+    return fakes
+
+
+def run_runner(sandbox: Fakes, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", str(RUNNER), "--repo", REPO, *args],
+        cwd=sandbox.work,
+        env=sandbox.env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+
+def claude_calls(sandbox: Fakes, kind: str | None = None) -> list[dict]:
+    return [c for c in sandbox.calls("claude") if kind is None or c["kind"] == kind]
+
+
+def arg_after(argv: list[str], flag: str) -> str:
+    return argv[argv.index(flag) + 1]
+
+
+# --- end to end: CLI and routing ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        [],
+        ["--issues", "abc"],
+        ["--issues", "1,"],
+        ["--issues", "1", "--max-ci-fixes", "x"],
+        ["--bogus"],
+        ["--issues"],
+    ],
+)
+def test_usage_errors_exit_2(sandbox: Fakes, args: list[str]) -> None:
+    result = run_runner(sandbox, *args)
+    assert result.returncode == 2, result.stderr
+    assert "Usage:" in result.stderr
+
+
+def test_unauthenticated_gh_exits_2(sandbox: Fakes) -> None:
+    sandbox.gh(r"^auth status", {"exit": 1}, first=True)
+    result = run_runner(sandbox, "--issues", "1")
+    assert result.returncode == 2
+    assert "gh is not authenticated" in result.stderr
+
+
+def test_dry_run_plans_routes_and_skips(sandbox: Fakes) -> None:
+    add_issue(
+        sandbox,
+        116,
+        "runpod-serving R1: group",
+        subs=[(117, "open"), (118, "closed"), (119, "open")],
+    )
+    add_issue(sandbox, 117, "runpod-serving 1.1 [Sonnet]: config loader")
+    add_issue(sandbox, 118, "runpod-serving 1.2 [Sonnet]: configs")
+    add_issue(sandbox, 119, "Untagged parity set")
+    add_issue(sandbox, 120, "runpod-serving 5.4 [Human]: pin weights")
+    sandbox.claude("route", {"result": 'ok\n{"tier": "Opus", "reason": "crosses modules"}'})
+
+    result = run_runner(sandbox, "--issues", "116,120", "--dry-run")
+
+    assert result.returncode == 0, result.stderr
+    assert "-> sonnet (tier tag [Sonnet] on the issue)" in result.stdout
+    assert "-> opus (model-routing skill: crosses modules)" in result.stdout
+    summary = result.stdout[result.stdout.index("ISSUE") :]
+    assert "#117" in summary and "planned" in summary
+    assert "#118" in summary and "skipped-closed" in summary
+    assert "#120" in summary and "skipped-human" in summary
+    calls = claude_calls(sandbox)
+    assert [c["kind"] for c in calls] == ["route"]
+    route = calls[0]
+    assert arg_after(route["argv"], "--model") == "sonnet"
+    tools = route["argv"][route["argv"].index("--allowedTools") + 1 :]
+    assert tools == ["Read", "Glob", "Grep", "Skill"]
+    assert route["api_key_set"] is False
+    assert "Untagged parity set" in route["prompt"]
+    assert not list((sandbox.work / ".claude" / "worktrees").glob("issue-*"))
+    assert not sandbox.gh_calls("pr ")
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [
+        (
+            [],
+            "-> opus (tier tag [Fable] on the issue; Fable downgraded to Opus (no --allow-fable))",
+        ),
+        (["--allow-fable"], "-> fable"),
+    ],
+)
+def test_fable_gate(sandbox: Fakes, flags: list[str], expected: str) -> None:
+    add_issue(sandbox, 5, "spec 0.1 [Fable]: draft design")
+    result = run_runner(sandbox, "--issues", "5", "--dry-run", *flags)
+    assert result.returncode == 0, result.stderr
+    assert expected in result.stdout
