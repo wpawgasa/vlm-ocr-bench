@@ -1,0 +1,3 @@
+# Allow-list of Runpod data centres that may serve client data (design D9). Empty = deploy
+# refuses. Fill it only from the human review in docs/runpod-data-processing-review.md.
+data_centers: []
