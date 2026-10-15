@@ -1,0 +1,35 @@
+{
+  "endpoint": {
+    "allowedCudaVersions": [
+      "12.8"
+    ],
+    "dataCenterIds": [],
+    "flashboot": true,
+    "gpuTypeIds": [
+      "NVIDIA L4",
+      "NVIDIA RTX A5000",
+      "NVIDIA GeForce RTX 3090"
+    ],
+    "idleTimeout": 120,
+    "name": "ocrbench-typhoon_ocr15",
+    "scaling": {
+      "type": "REQUEST_COUNT",
+      "value": 4
+    },
+    "templateId": "tmpl-id",
+    "type": "load_balancer",
+    "workers": {
+      "max": 3,
+      "min": 0
+    }
+  },
+  "template": {
+    "disk": 30,
+    "image": "ghcr.io/wpawgasa/vlm-ocr-bench/runpod-typhoon_ocr15@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "name": "ocrbench-typhoon_ocr15-9d7fb250",
+    "ports": [
+      "8000/http"
+    ],
+    "serverless": true
+  }
+}

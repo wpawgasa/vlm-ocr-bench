@@ -1,0 +1,35 @@
+{
+  "endpoint": {
+    "allowedCudaVersions": [
+      "12.8"
+    ],
+    "dataCenterIds": [],
+    "flashboot": true,
+    "gpuTypeIds": [
+      "NVIDIA L4",
+      "NVIDIA RTX A5000",
+      "NVIDIA GeForce RTX 3090"
+    ],
+    "idleTimeout": 120,
+    "name": "ocrbench-ovisocr2",
+    "scaling": {
+      "type": "REQUEST_COUNT",
+      "value": 4
+    },
+    "templateId": "tmpl-id",
+    "type": "load_balancer",
+    "workers": {
+      "max": 3,
+      "min": 0
+    }
+  },
+  "template": {
+    "disk": 30,
+    "image": "ghcr.io/wpawgasa/vlm-ocr-bench/runpod-ovisocr2@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "name": "ocrbench-ovisocr2-4bbfc488",
+    "ports": [
+      "8000/http"
+    ],
+    "serverless": true
+  }
+}
