@@ -44,6 +44,10 @@ scripts/run_issue.sh --issues 117,118,116 [--allow-fable] [--max-ci-fixes 2]
 
 **Subscription auth:** every `claude` invocation runs with `ANTHROPIC_API_KEY` (and `ANTHROPIC_AUTH_TOKEN`) unset, so the CLI uses the logged-in subscription and never falls back to API billing.
 
+**Scrubbed agent environment:** every `claude` call and the runner's post-check `uv run` commands run via `agent_env` (lib.sh): `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `SSH_AUTH_SOCK` unset; `GH_CONFIG_DIR` set to an empty per-run directory under the run's log dir; `GIT_TERMINAL_PROMPT=0`; git credential helpers disabled (`GIT_CONFIG_COUNT=1`, `credential.helper` = empty). The allowlist only pre-approves tools (`uv run` can run arbitrary code); the protection is the scrubbed environment, the runner owning push/PR/merge, and the protected-path checks.
+
+**Timeouts:** each `claude` call runs under `timeout "${RUN_ISSUE_AGENT_TIMEOUT:-3600}"` (expiry → status `missing` → normal fix path); `gh pr checks --watch` runs under `timeout "${RUN_ISSUE_CI_TIMEOUT:-3600}"` (expiry → CI failure).
+
 ## Phase 1 — Resolve issues
 
 For each number in order:
@@ -66,11 +70,11 @@ Tier source, first match wins: a `[Sonnet]|[Opus]|[Human]|[Fable]` tag in the ti
 | Fable | `--model fable` if `--allow-fable`, else `--model opus` with note "Fable downgraded to Opus (no --allow-fable)" |
 | none | routing call (below) |
 
-**Routing call** (untagged issues): `claude -p` with `--model sonnet`, read-only tools (`Read,Glob,Grep,Skill`), prompt `scripts/run_issue/route.md` filled with the issue title and body, instructing it to apply the `model-routing` skill and print only `{"tier":"Opus|Sonnet|Human|Fable","reason":"…"}`. The runner extracts the last JSON object from the result. Unparseable result → Sonnet, reason "routing output unparseable; model-routing default". The Fable gate applies to the routed tier.
+**Routing call** (untagged issues): `claude -p` with `--model sonnet`, cwd = main checkout, `--permission-mode default --disallowedTools Edit Write NotebookEdit Bash` and read-only tools (`Read,Glob,Grep,Skill`), prompt `scripts/run_issue/route.md` filled with the issue title and body, instructing it to apply the `model-routing` skill and print only `{"tier":"Opus|Sonnet|Human|Fable","reason":"…"}`. The runner extracts the last JSON object from the result. Unparseable result → Sonnet, reason "routing output unparseable; model-routing default". The Fable gate applies to the routed tier.
 
 ## Phase 3 — Implement
 
-1. `git fetch origin`; `git worktree add .claude/worktrees/issue-<n> -b issue/<n>-<slug> origin/<base>` (reuse branch/worktree if they exist — rerun/resume case). `slug` = title without tier tag, lowercased, non-alphanumerics → `-`, max 40 chars.
+1. `git fetch origin`; `git worktree add .claude/worktrees/issue-<n> -b issue/<n>-<slug> origin/<base>` (reuse branch/worktree if they exist — rerun/resume case). After every agent call on an issue (implement, fix, ci-fix) the runner writes the parsed status to `<worktree>/.run_issue/STATUS`; a reused worktree skips the implement call only when that file says exactly `done` and the post-checks pass. `slug` = title without tier tag, lowercased, non-alphanumerics → `-`, max 40 chars.
 2. `uv sync --all-extras --frozen` in the worktree.
 3. Agent call, cwd = worktree:
 
@@ -79,7 +83,7 @@ Tier source, first match wins: a `[Sonnet]|[Opus]|[Human]|[Fable]` tag in the ti
      --allowedTools "<allowed_tools.txt joined by ,>" --output-format json
    ```
 
-   **Allowlist** (`scripts/run_issue/allowed_tools.txt`): `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Skill`, `TodoWrite`, `Bash(uv run:*)`, `Bash(uv sync:*)`, `Bash(git add:*)`, `Bash(git commit:*)`, `Bash(git status:*)`, `Bash(git diff:*)`, `Bash(git log:*)`, `Bash(gh issue view:*)`, `Bash(openspec:*)`, `Bash(ls:*)`, `Bash(cat:*)`, `Bash(rg:*)`, `Bash(find:*)`, `Bash(head:*)`, `Bash(tail:*)`, `Bash(mkdir:*)`. Deliberately excluded: `git push`, `gh pr`, `gh api`, network tools.
+   **Allowlist** (`scripts/run_issue/allowed_tools.txt`): `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Skill`, `TodoWrite`, `Bash(uv run:*)`, `Bash(uv sync:*)`, `Bash(git add:*)`, `Bash(git commit:*)`, `Bash(git status:*)`, `Bash(git diff:*)`, `Bash(git log:*)`, `Bash(openspec:*)`, `Bash(ls:*)`, `Bash(cat:*)`, `Bash(rg:*)`, `Bash(find:*)`, `Bash(head:*)`, `Bash(tail:*)`, `Bash(mkdir:*)`. Deliberately excluded: `git push`, any `gh` command, network tools (the issue body is already in the prompt, fenced as data).
 
    **Prompt** (`scripts/run_issue/implement.md`) contains the issue number, title, body, routing reason, and instructs the agent to:
    1. Use `superpowers:test-driven-development`: for each task in the issue, write a failing test first, then implement. For bug fixes, `superpowers:systematic-debugging` first.
@@ -93,7 +97,9 @@ Tier source, first match wins: a `[Sonnet]|[Opus]|[Human]|[Fable]` tag in the ti
    - agent output's result text ends with `RESULT: done`;
    - `git rev-list origin/<base>..HEAD` non-empty;
    - `PR_BODY.md` exists and has all five headings;
-   - `git diff --name-only origin/<base>..HEAD` includes a path under `tests/`;
+   - `git diff --name-only origin/<base>...HEAD` (merge base, so commits that reached `<base>` after the branch point do not count; same for the next two checks) touches no prefix in `scripts/run_issue/protected_paths.txt` (`.github/`, `.claude/`, `scripts/run_issue.sh`, `scripts/run_issue/`; failure message names the paths and asks to revert them);
+   - no file under `tests/` is deleted (`--diff-filter=D`);
+   - `git diff --name-only --diff-filter=AM origin/<base>...HEAD` includes a path under `tests/`;
    - runner re-runs ruff check, ruff format --check, pytest `-m "not live"` in the worktree.
 
 5. **Failure handling:** any post-check failure → one fix round (`claude -p` with `fix.md`, same model and allowlist, containing the failed check's output tail, last 200 lines). Still failing and model is Sonnet → one retry round on Opus (model-routing escalation rule). Still failing → outcome `blocked`, worktree kept, **run halts** (later issues may depend on this one). `RESULT: blocked` from the agent halts immediately without fix rounds.
@@ -101,11 +107,11 @@ Tier source, first match wins: a `[Sonnet]|[Opus]|[Human]|[Fable]` tag in the ti
 ## Phase 4 — PR, CI, merge
 
 1. `git push -u origin <branch>`.
-2. If `gh pr list --head <branch> --state open` finds a PR, reuse it (and `gh pr edit --body-file`); else `gh pr create --base <base> --head <branch> --title "<title without tier tag> (#<n>)" --body-file <body>` where body = `PR_BODY.md` + `\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
+2. If `gh pr list --base <base> --head <branch> --state open` finds a PR, reuse it (and `gh pr edit --body-file`); else `gh pr create --base <base> --head <branch> --title "<title without tier tag> (#<n>)" --body-file <body>` where body = `PR_BODY.md` + a `Closes #<n>` line (added once, unless present) + `\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
 3. Wait for checks to register: poll `gh pr checks <pr>` every 10 s up to 5 min. No checks after that → outcome `ci-failed` (reason "no CI checks reported"), not merged.
 4. `gh pr checks <pr> --watch --fail-fast`.
    - exit 0 → `gh pr merge <pr> --squash --delete-branch`; outcome `merged`.
-   - non-zero → fetch failed log: newest failed run on the branch via `gh run list --branch <branch> --status failure --limit 1 --json databaseId`, then `gh run view <id> --log-failed | tail -200`. Agent fix round with `fix.md` (CI variant, instructs `superpowers:systematic-debugging`), then runner local re-verify, push, back to step 3. Up to `--max-ci-fixes` rounds.
+   - non-zero → fetch failed log: newest failed run for the pushed head via `gh run list --commit <sha> --status failure --limit 1 --json databaseId`, then `gh run view <id> --log-failed | tail -200`. Agent fix round with `fix.md` (CI variant, instructs `superpowers:systematic-debugging`), then runner local re-verify, push, back to step 3. Up to `--max-ci-fixes` rounds.
    - exhausted → `gh pr comment` summarizing the failure, PR left open, outcome `ci-failed`, **run halts**.
 
 ## Phase 5 — Bookkeeping
