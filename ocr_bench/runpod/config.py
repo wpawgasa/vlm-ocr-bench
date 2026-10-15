@@ -84,6 +84,7 @@ class EndpointConfig(_Strict):
     data_centers: list[str] = Field(default_factory=list)  # non-empty enforced at deploy time
     cuda_min: str
     container_disk_gb: int = Field(ge=1)
+    network_volume: str | None = None  # never on a promotable endpoint (D9); deploy refuses
 
 
 class ClientConfig(_Strict):
@@ -146,9 +147,10 @@ def load_runpod_config(path: str | Path, models_dir: str | Path | None = None) -
 
 def config_hash(cfg: RunpodModelConfig) -> str:
     """SHA-256 of the canonical (key-sorted) YAML of the config."""
-    canonical = yaml.safe_dump(
-        cfg.model_dump(mode="json"), sort_keys=True, default_flow_style=False, allow_unicode=True
-    )
+    data = cfg.model_dump(mode="json")
+    if data["endpoint"]["network_volume"] is None:  # optional, added later: keep old hashes
+        del data["endpoint"]["network_volume"]
+    canonical = yaml.safe_dump(data, sort_keys=True, default_flow_style=False, allow_unicode=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -156,6 +158,16 @@ def _vllm_major_minor(version: str) -> tuple[int, int]:
     m = _VERSION_RE.match(version)
     assert m is not None  # validated by ImageConfig
     return int(m.group(1)), int(m.group(2))
+
+
+def logging_flags(vllm_version: str) -> list[str]:
+    """The D9 flags that keep request content out of the worker logs."""
+    # 0.11 has --disable-log-requests; >= 0.12 replaced it with --no-enable-log-requests.
+    legacy = _vllm_major_minor(vllm_version) < (0, 12)
+    return [
+        "--disable-log-requests" if legacy else "--no-enable-log-requests",
+        *["--max-log-len", "0", "--uvicorn-log-level", "warning", "--mm-processor-cache-gb", "0"],
+    ]
 
 
 def render_vllm_argv(cfg: RunpodModelConfig) -> list[str]:
@@ -169,8 +181,4 @@ def render_vllm_argv(cfg: RunpodModelConfig) -> list[str]:
             argv.append(flag)
         else:
             argv += [flag, str(value)]
-    # 0.11 has --disable-log-requests; >= 0.12 replaced it with --no-enable-log-requests.
-    legacy = _vllm_major_minor(cfg.image.vllm_version) < (0, 12)
-    argv.append("--disable-log-requests" if legacy else "--no-enable-log-requests")
-    argv += ["--max-log-len", "0", "--uvicorn-log-level", "warning", "--mm-processor-cache-gb", "0"]
-    return argv
+    return argv + logging_flags(cfg.image.vllm_version)
