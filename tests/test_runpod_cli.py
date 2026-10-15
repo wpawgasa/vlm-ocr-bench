@@ -47,6 +47,14 @@ def test_build_runs_docker_build_with_pinned_args(fake_docker, tmp_path):
     assert "-f runpod/Dockerfile" in call
 
 
+def test_smoke_unset_endpoint_exits_2(tmp_path, monkeypatch):
+    configs = pinned_configs(tmp_path / "c")
+    monkeypatch.delenv("TYPHOON_BASE_URL", raising=False)
+    result = runner.invoke(app, ["runpod", "smoke", "typhoon_ocr15", "--configs-dir", str(configs)])
+    assert result.exit_code == 2
+    assert "TYPHOON_BASE_URL" in result.output
+
+
 def test_build_push_pushes_then_prints_digest(fake_docker, tmp_path):
     configs = pinned_configs(tmp_path / "c")
     result = runner.invoke(

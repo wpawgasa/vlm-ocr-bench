@@ -1,0 +1,1 @@
+- `smoke_page.png`: page used by `ocrbench runpod smoke`. Currently a synthetic public placeholder (generated text, no client data). Replace it with one public ThaiOCRBench `ocr_fullpage` page and record its sample id and licence here when the dataset is at hand.
