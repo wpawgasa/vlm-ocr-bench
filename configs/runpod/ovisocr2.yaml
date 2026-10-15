@@ -1,9 +1,8 @@
 # Runpod serving facts for OvisOCR2 (design D2); compose service `ovisocr2`, vLLM 0.22.1.
-# TODO(task 6.1/5.4): image.base is REQUIRED until the vllm/vllm-openai:v0.22.1 digest is
-# resolved (needs registry access); weights.revision is pinned in task 5.4. Both fail validation.
+# weights.revision is pinned in task 5.4 and fails validation until then.
 model: ovisocr2
 image:
-  base: vllm/vllm-openai@sha256:REQUIRED
+  base: vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7
   vllm_version: "0.22.1"
   variant: plain
 weights:

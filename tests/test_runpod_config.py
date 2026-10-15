@@ -203,6 +203,18 @@ def test_shipped_config_fails_on_revision_placeholder(model):
     assert ("weights", "revision") in {e["loc"] for e in exc.value.errors()}
 
 
+_PINNED_BASE = {
+    "0.11.0": "sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c",
+    "0.22.1": "sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7",
+}
+
+
+@pytest.mark.parametrize("model", COMPOSE_SERVICE)
+def test_base_image_pinned_to_digest_of_its_vllm_version(model):
+    image = _shipped(model)["image"]
+    assert image["base"] == "vllm/vllm-openai@" + _PINNED_BASE[image["vllm_version"]]
+
+
 def test_data_centers_allow_list_is_empty_and_points_at_review():
     text = (RUNPOD_DIR / "data_centers.yaml").read_text()
     assert yaml.safe_load(text) == {"data_centers": []}

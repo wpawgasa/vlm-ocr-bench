@@ -1,10 +1,9 @@
 # Runpod serving facts for PaddleOCR-VL-1.6 (design D2/D3); compose service `paddleocr_vl`,
 # vLLM 0.22.1. One worker runs vLLM at 0.7 GPU memory plus the PaddleX pipeline on the same GPU.
-# TODO(task 6.1/5.4): image.base is REQUIRED until the vllm/vllm-openai:v0.22.1 digest is
-# resolved (needs registry access); weights.revision is pinned in task 5.4. Both fail validation.
+# weights.revision is pinned in task 5.4 and fails validation until then.
 model: paddleocr_vl
 image:
-  base: vllm/vllm-openai@sha256:REQUIRED
+  base: vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7
   vllm_version: "0.22.1"
   variant: paddle
 weights:
