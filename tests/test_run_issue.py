@@ -7,6 +7,8 @@ and `uv` (tests/fixtures/run_issue/fake_tools.py) on PATH.
 
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -214,3 +216,126 @@ def test_load_tools_skips_comments_and_blanks(tmp_path: Path) -> None:
     tools = tmp_path / "tools.txt"
     tools.write_text("# comment\nRead\n\n  \nBash(uv run:*)\n")
     assert out("load_tools", str(tools)).splitlines() == ["Read", "Bash(uv run:*)"]
+
+
+# --- fakes -------------------------------------------------------------------
+
+
+class Fakes:
+    """Fake gh/claude/uv on PATH, driven by a scenario file (see fake_tools.py)."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        self.bin = tmp_path / "bin"
+        self.bin.mkdir()
+        self.log = tmp_path / "fake-log.jsonl"
+        self.state = tmp_path / "fake-state.json"
+        self.scenario_path = tmp_path / "scenario.json"
+        self.scenario: dict = {"gh": [], "uv": [], "claude": {}}
+        for tool in ("gh", "claude", "uv"):
+            wrapper = self.bin / tool
+            wrapper.write_text(f'#!/usr/bin/env bash\nexec python3 "{FAKE_TOOLS}" {tool} "$@"\n')
+            wrapper.chmod(0o755)
+        self.env = {
+            **os.environ,
+            "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+            "FAKE_LOG": str(self.log),
+            "FAKE_STATE": str(self.state),
+            "FAKE_SCENARIO": str(self.scenario_path),
+        }
+        self._save()
+
+    def _save(self) -> None:
+        self.scenario_path.write_text(json.dumps(self.scenario))
+
+    def _rule(self, tool: str, match: str, responses: tuple, first: bool) -> None:
+        rule = {
+            "match": match,
+            "responses": [r if isinstance(r, dict) else {"stdout": r} for r in responses] or [{}],
+        }
+        if first:
+            self.scenario[tool].insert(0, rule)
+        else:
+            self.scenario[tool].append(rule)
+        self._save()
+
+    def gh(self, match: str, *responses: str | dict, first: bool = False) -> None:
+        self._rule("gh", match, responses, first)
+
+    def uv(self, match: str, *responses: str | dict, first: bool = False) -> None:
+        self._rule("uv", match, responses, first)
+
+    def claude(self, kind: str, *actions: dict) -> None:
+        self.scenario["claude"][kind] = list(actions)
+        self._save()
+
+    def calls(self, tool: str) -> list[dict]:
+        if not self.log.exists():
+            return []
+        entries = [json.loads(line) for line in self.log.read_text().splitlines()]
+        return [e for e in entries if e["tool"] == tool]
+
+    def gh_calls(self, prefix: str) -> list[dict]:
+        return [c for c in self.calls("gh") if " ".join(c["argv"]).startswith(prefix)]
+
+    def reset(self) -> None:
+        """Forget logged calls and response counters (between two runs)."""
+        self.log.unlink(missing_ok=True)
+        self.state.unlink(missing_ok=True)
+
+
+def add_issue(
+    fakes: Fakes,
+    n: int,
+    title: str,
+    body: str = "Do the thing.",
+    state: str = "open",
+    parent: int | None = None,
+    subs: list[tuple[int, str]] | None = None,
+) -> None:
+    """Script the gh replies describing issue N."""
+    fakes.gh(
+        rf"^api repos/{REPO}/issues/{n}/sub_issues ",
+        "".join(f"{s} {st}\n" for s, st in subs or []),
+    )
+    fakes.gh(rf"^issue view {n} -R {REPO} --json title ", title + "\n")
+    fakes.gh(rf"^issue view {n} -R {REPO} --json body ", body + "\n")
+    fakes.gh(rf"^issue view {n} -R {REPO} --json state ", state + "\n")
+    fakes.gh(
+        rf"^api repos/{REPO}/issues/{n}/parent ",
+        f"{parent}\n" if parent else {"exit": 1},
+    )
+
+
+@pytest.fixture
+def fakes(tmp_path: Path) -> Fakes:
+    return Fakes(tmp_path)
+
+
+# --- issue expansion ---------------------------------------------------------
+
+
+def test_expand_issues_replaces_group_with_sub_issues(fakes: Fakes) -> None:
+    add_issue(fakes, 116, "group R1", subs=[(117, "open"), (118, "closed"), (119, "open")])
+    add_issue(fakes, 120, "leaf [Opus]: thing")
+    add_issue(fakes, 117, "leaf [Sonnet]: dup")
+    lines = out("expand_issues", REPO, "116", "120", "117", env=fakes.env).splitlines()
+    assert lines == ["117 open", "118 closed", "119 open", "120 open"]
+
+
+def test_expand_issues_falls_back_to_task_refs(fakes: Fakes) -> None:
+    body = (
+        "Intro mentions (#5).\n\n### Tasks\n"
+        "- [ ] 1.1 [Sonnet] first (#11)\n"
+        "- [x] 1.2 [Sonnet] second (#12)\n\n"
+        "### Notes\n- [ ] unrelated (#99)\n"
+    )
+    add_issue(fakes, 10, "group", body=body)
+    add_issue(fakes, 11, "a [Sonnet]: a")
+    add_issue(fakes, 12, "b [Sonnet]: b", state="closed")
+    lines = out("expand_issues", REPO, "10", env=fakes.env).splitlines()
+    assert lines == ["11 open", "12 closed"]
+
+
+def test_expand_issues_keeps_leaf(fakes: Fakes) -> None:
+    add_issue(fakes, 7, "leaf [Opus]: x", state="closed")
+    assert out("expand_issues", REPO, "7", env=fakes.env) == "7 closed"

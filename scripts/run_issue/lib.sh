@@ -197,3 +197,46 @@ add_num() {
 load_tools() {
   grep -vE '^[[:space:]]*(#|$)' "$1"
 }
+
+# issue_state REPO N — "open" or "closed" (empty when the issue cannot be read).
+issue_state() {
+  gh issue view "$2" -R "$1" --json state --jq '.state | ascii_downcase' 2>/dev/null
+}
+
+# task_refs — read an issue body on stdin; print N for each "(#N)" on a checklist
+# line inside its "### Tasks" section.
+task_refs() {
+  awk '/^### Tasks/ { inside = 1; next } /^#/ { inside = 0 } inside && /^[ \t]*- \[[ xX]\] /' |
+    grep -oE '\(#[0-9]+\)' | tr -d '(#)' || true
+}
+
+# expand_issues REPO N... — print "<number> <state>" for each issue to run, in
+# order. An issue with sub-issues (GitHub sub-issue API, else the "(#N)" refs in
+# its "### Tasks" section) is replaced by them. Duplicates are dropped.
+expand_issues() {
+  local repo=$1 n num line body
+  shift
+  local -A seen=()
+  local -a rows
+  for n in "$@"; do
+    rows=()
+    mapfile -t rows < <(gh api "repos/$repo/issues/$n/sub_issues" --paginate \
+      --jq '.[] | "\(.number) \(.state)"' 2>/dev/null || true)
+    if ((${#rows[@]} == 0)); then
+      body=$(gh issue view "$n" -R "$repo" --json body --jq .body 2>/dev/null || true)
+      for num in $(task_refs <<<"$body"); do
+        rows+=("$num $(issue_state "$repo" "$num")")
+      done
+    fi
+    if ((${#rows[@]} == 0)); then
+      rows=("$n $(issue_state "$repo" "$n")")
+    fi
+    for line in "${rows[@]}"; do
+      [[ -n $line ]] || continue
+      num=${line%% *}
+      [[ -z ${seen[$num]:-} ]] || continue
+      seen[$num]=1
+      printf '%s\n' "$line"
+    done
+  done
+}
