@@ -41,6 +41,21 @@ def check(record: dict[str, Any]) -> None:
         raise ReleaseRecordError("release record contains an API key or endpoint id")
 
 
+def update_latest(model: str, fields: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
+    """Merge `fields` into the model's most recent record (e.g. a promotion) and save the log."""
+    path = Path(path or DEFAULT_PATH)
+    records = load_releases(path)
+    for record in reversed(records):
+        if record.get("model") == model:
+            check({**record, **fields})
+            record.update(fields)
+            path.write_text(
+                yaml.safe_dump(records, sort_keys=False, allow_unicode=True), encoding="utf-8"
+            )
+            return record
+    raise ReleaseRecordError(f"no release record for {model}")
+
+
 def append(record: dict[str, Any], path: Path | None = None) -> None:
     """Append a record; raise ReleaseRecordError if any string in it looks like a secret."""
     check(record)
