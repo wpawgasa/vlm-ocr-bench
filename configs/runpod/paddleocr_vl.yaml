@@ -1,0 +1,41 @@
+# Runpod serving facts for PaddleOCR-VL-1.6 (design D2/D3); compose service `paddleocr_vl`,
+# vLLM 0.22.1. One worker runs vLLM at 0.7 GPU memory plus the PaddleX pipeline on the same GPU.
+# weights.revision is pinned in task 5.4 and fails validation until then.
+model: paddleocr_vl
+image:
+  base: vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7
+  vllm_version: "0.22.1"
+  variant: paddle
+weights:
+  repo: PaddlePaddle/PaddleOCR-VL-1.6
+  revision: REQUIRED
+vllm_args:
+  trust-remote-code: true
+  dtype: bfloat16
+  max-model-len: 16384
+  max-num-batched-tokens: 16384
+  no-enable-prefix-caching: true
+  limit-mm-per-prompt: '{"image": 1}'
+  gpu-memory-utilization: 0.7
+  seed: 0
+  max-logprobs: 5
+endpoint:
+  kind: load_balancing
+  gpu_types: ["NVIDIA L4", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 3090"]
+  workers_min: 0
+  workers_max: 3
+  idle_timeout_s: 120
+  scaler: {type: REQUEST_COUNT, value: 4}
+  flashboot: true
+  data_centers: []
+  cuda_min: "12.8"
+  container_disk_gb: 30
+client:
+  max_concurrency: 4
+  request_timeout_s: 120
+  cold_start_wait_s: 600
+  max_request_mb: 25
+slo:
+  page_p50_s: 6
+  page_p95_s: 20
+  cold_start_p95_s: 90

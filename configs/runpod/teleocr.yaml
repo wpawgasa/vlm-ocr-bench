@@ -1,0 +1,41 @@
+# Runpod serving facts for TeleOCR (design D2); compose service `teleocr`. The `teleocr` image
+# variant adds the plugin and no-repeat-ngram logits processor (same pinned commit as
+# .devcontainer/teleocr-vllm.Dockerfile). weights.revision stays REQUIRED until task 5.4.
+model: teleocr
+image:
+  base: vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c
+  vllm_version: "0.11.0"
+  variant: teleocr
+weights:
+  repo: StarDoc-AI/TeleOCR
+  revision: REQUIRED
+vllm_args:
+  logits-processors: teleocr_no_repeat_ngram:VllmV1NoRepeatNGramLogitsProcessor
+  trust-remote-code: true
+  dtype: bfloat16
+  max-model-len: 16384
+  limit-mm-per-prompt: '{"image": 1}'
+  gpu-memory-utilization: 0.9
+  seed: 0
+  max-logprobs: 5
+endpoint:
+  kind: load_balancing
+  gpu_types: ["NVIDIA L4", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 3090"]
+  workers_min: 0
+  workers_max: 3
+  idle_timeout_s: 120
+  scaler: {type: REQUEST_COUNT, value: 4}
+  flashboot: true
+  data_centers: []
+  cuda_min: "12.8"
+  container_disk_gb: 30
+client:
+  max_concurrency: 4
+  request_timeout_s: 120
+  cold_start_wait_s: 600
+  max_request_mb: 25
+slo:
+  # one layout request plus N block requests per page (design D7)
+  page_p50_s: 12
+  page_p95_s: 40
+  cold_start_p95_s: 90

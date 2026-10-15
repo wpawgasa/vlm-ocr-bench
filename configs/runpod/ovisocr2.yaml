@@ -1,0 +1,38 @@
+# Runpod serving facts for OvisOCR2 (design D2); compose service `ovisocr2`, vLLM 0.22.1.
+# weights.revision is pinned in task 5.4 and fails validation until then.
+model: ovisocr2
+image:
+  base: vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7
+  vllm_version: "0.22.1"
+  variant: plain
+weights:
+  repo: ATH-MaaS/OvisOCR2
+  revision: REQUIRED
+vllm_args:
+  gdn-prefill-backend: triton
+  dtype: bfloat16
+  max-model-len: 32768
+  limit-mm-per-prompt: '{"image": 1}'
+  gpu-memory-utilization: 0.9
+  seed: 0
+  max-logprobs: 5
+endpoint:
+  kind: load_balancing
+  gpu_types: ["NVIDIA L4", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 3090"]
+  workers_min: 0
+  workers_max: 3
+  idle_timeout_s: 120
+  scaler: {type: REQUEST_COUNT, value: 4}
+  flashboot: true
+  data_centers: []
+  cuda_min: "12.8"
+  container_disk_gb: 30
+client:
+  max_concurrency: 4
+  request_timeout_s: 120
+  cold_start_wait_s: 600
+  max_request_mb: 25
+slo:
+  page_p50_s: 6
+  page_p95_s: 20
+  cold_start_p95_s: 90

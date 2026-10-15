@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -142,3 +143,79 @@ def test_hash_changes_with_content(tree):
     raw["vllm_args"]["seed"] = 1
     b = load_runpod_config(_write(tree, raw, "other.yaml"))
     assert config_hash(a) != config_hash(b)
+
+
+# --- shipped configs vs the compose services (design D8) ---------------------------------------
+
+REPO = Path(__file__).resolve().parent.parent
+RUNPOD_DIR = REPO / "configs" / "runpod"
+COMPOSE_SERVICE = {
+    "dotsocr": "dotsocr",
+    "typhoon_ocr15": "typhoon",
+    "teleocr": "teleocr",
+    "ovisocr2": "ovisocr2",
+    "paddleocr_vl": "paddleocr_vl",
+}
+# mm-processor-cache-gb is appended by render_vllm_argv (D9), so it is not in vllm_args.
+_HOST_FLAGS = ("model", "served-model-name", "gpu-memory-utilization", "mm-processor-cache-gb")
+
+
+def _shipped(model: str) -> dict:
+    return yaml.safe_load((RUNPOD_DIR / f"{model}.yaml").read_text())
+
+
+def _compose_args(service: str) -> dict:
+    compose = yaml.safe_load((REPO / ".devcontainer" / "compose.yaml").read_text())
+    out: dict = {}
+    for item in compose["services"][service]["command"]:
+        flag, sep, value = item.removeprefix("--").partition("=")
+        if flag in _HOST_FLAGS:
+            continue
+        if "${" in value:
+            # a substitution like ${VLLM_DTYPE:-bfloat16}: the config pins its default
+            value = re.fullmatch(r"\$\{\w+:-([^}]*)\}", value).group(1)
+        out[flag] = value if sep else True
+    return out
+
+
+@pytest.mark.parametrize("model", COMPOSE_SERVICE)
+def test_configs_match_compose(model):
+    raw = _shipped(model)
+    assert raw["model"] == model
+    cfg_args = {k: v for k, v in raw["vllm_args"].items() if k not in _HOST_FLAGS}
+    normalised = {k: (v if v is True else str(v)) for k, v in cfg_args.items() if v is not None}
+    assert normalised == _compose_args(COMPOSE_SERVICE[model])
+
+
+def test_variants_and_paddle_memory():
+    assert _shipped("teleocr")["image"]["variant"] == "teleocr"
+    assert _shipped("paddleocr_vl")["image"]["variant"] == "paddle"
+    assert _shipped("paddleocr_vl")["vllm_args"]["gpu-memory-utilization"] == 0.7
+    for m in ("dotsocr", "typhoon_ocr15", "ovisocr2"):
+        assert _shipped(m)["image"]["variant"] == "plain"
+
+
+@pytest.mark.parametrize("model", COMPOSE_SERVICE)
+def test_shipped_config_fails_on_revision_placeholder(model):
+    assert _shipped(model)["weights"]["revision"] == "REQUIRED"
+    with pytest.raises(ValidationError) as exc:
+        load_runpod_config(RUNPOD_DIR / f"{model}.yaml")
+    assert ("weights", "revision") in {e["loc"] for e in exc.value.errors()}
+
+
+_PINNED_BASE = {
+    "0.11.0": "sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c",
+    "0.22.1": "sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7",
+}
+
+
+@pytest.mark.parametrize("model", COMPOSE_SERVICE)
+def test_base_image_pinned_to_digest_of_its_vllm_version(model):
+    image = _shipped(model)["image"]
+    assert image["base"] == "vllm/vllm-openai@" + _PINNED_BASE[image["vllm_version"]]
+
+
+def test_data_centers_allow_list_is_empty_and_points_at_review():
+    text = (RUNPOD_DIR / "data_centers.yaml").read_text()
+    assert yaml.safe_load(text) == {"data_centers": []}
+    assert "runpod-data-processing-review.md" in text
