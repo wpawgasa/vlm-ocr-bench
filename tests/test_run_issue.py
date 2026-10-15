@@ -665,3 +665,40 @@ def test_sonnet_escalates_to_opus_and_recovers(sandbox: Fakes) -> None:
     fixes = claude_calls(sandbox, "fix")
     assert [arg_after(c["argv"], "--model") for c in fixes] == ["sonnet", "opus"]
     assert "sonnet>opus" in result.stdout
+
+
+def test_existing_non_worktree_directory_is_refused(sandbox: Fakes) -> None:
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: y")
+    stray = sandbox.work / ".claude" / "worktrees" / "issue-117"
+    stray.mkdir(parents=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sandbox.work, capture_output=True, text=True, check=True
+    ).stdout
+
+    result = run_runner(sandbox, "--issues", "117")
+
+    assert result.returncode == 1
+    assert not claude_calls(sandbox, "implement")
+    assert "not a git worktree" in result.stderr + result.stdout
+    new_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sandbox.work, capture_output=True, text=True, check=True
+    ).stdout
+    assert new_head == head
+
+
+def test_resume_after_retitle_adopts_existing_branch(sandbox: Fakes) -> None:
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: old title")
+    ship_ok(sandbox, 117)
+    first = run_runner(sandbox, "--issues", "117")
+    assert first.returncode == 0, first.stderr
+    sandbox.reset()
+    sandbox.scenario["gh"] = []
+    sandbox._save()
+    add_issue(sandbox, 117, "x 1.1 [Sonnet]: brand new title")
+    ship_ok(sandbox, 117)
+
+    result = run_runner(sandbox, "--issues", "117")
+
+    assert result.returncode == 0, result.stderr
+    assert not claude_calls(sandbox, "implement")
+    assert "issue/117-x-1-1-old-title" in result.stderr + result.stdout

@@ -142,7 +142,7 @@ post_checks() {
 # MODEL, then one on Opus when MODEL is Sonnet. Sets ISSUE_WT, ISSUE_BRANCH and
 # ISSUE_MODEL. Returns 1 when the run must halt.
 implement_issue() {
-  local n=$1 title=$2 body=$3 model=$4 reason=$5 prompt status failure m reused=0
+  local n=$1 title=$2 body=$3 model=$4 reason=$5 prompt status failure m top cur reused=0
   ISSUE_BRANCH=$(branch_name "$n" "$title")
   ISSUE_WT="$ROOT/.claude/worktrees/issue-$n"
   ISSUE_MODEL=$model
@@ -152,6 +152,19 @@ implement_issue() {
   }
   if [[ -d $ISSUE_WT ]]; then
     reused=1
+    top=$(git -C "$ISSUE_WT" rev-parse --show-toplevel 2>/dev/null)
+    if [[ -z $top || $(cd "$top" && pwd -P) != "$(cd "$ISSUE_WT" && pwd -P)" ]]; then
+      log "#$n: $ISSUE_WT exists but is not a git worktree; remove it and re-run"
+      return 1
+    fi
+    cur=$(git -C "$ISSUE_WT" symbolic-ref --short HEAD 2>/dev/null) || {
+      log "#$n: worktree $ISSUE_WT has a detached HEAD; check out a branch or remove it"
+      return 1
+    }
+    if [[ $cur != "$ISSUE_BRANCH" ]]; then
+      log "#$n: worktree is on $cur, not $ISSUE_BRANCH (issue retitled?); using $cur"
+      ISSUE_BRANCH=$cur
+    fi
   elif git -C "$ROOT" show-ref --verify --quiet "refs/heads/$ISSUE_BRANCH"; then
     reused=1
     git -C "$ROOT" worktree add -q "$ISSUE_WT" "$ISSUE_BRANCH" >>"$CURRENT_LOG" 2>&1 || return 1
