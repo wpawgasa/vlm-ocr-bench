@@ -24,6 +24,8 @@ DOCKER_BUILDKIT=1 devcontainer up --workspace-folder .
 
 Per-host overrides (paths, GPU ids, ports, vLLM image tag, `HF_TOKEN`) go in `.devcontainer/.env`,
 see `.devcontainer/.env.example`.
+Secrets the `ocrbench` CLI reads (`RUNPOD_API_KEY`) go in the repo-root `.env` (gitignored,
+see `.env.example`); the CLI loads it at startup and never overrides a variable already set.
 
 ## Development
 
