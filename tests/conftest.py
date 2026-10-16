@@ -18,6 +18,12 @@ from matplotlib.backends.backend_pdf import PdfPages  # noqa: E402
 plt.rcParams["pdf.fonttype"] = 42
 
 
+@pytest.fixture(autouse=True)
+def _no_developer_env_file(tmp_path, monkeypatch):
+    """Keep a developer's real ./.env (and its keys) out of every CLI test."""
+    monkeypatch.setattr("ocr_bench.cli.ENV_FILE", tmp_path / "no-such.env")
+
+
 def _write_digital_pdf(
     path, n_pages: int = 2, line: str = "KBANK Statement Balance 1,000.00"
 ) -> None:

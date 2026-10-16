@@ -137,7 +137,7 @@ A typer command group in `ocr_bench/runpod/cli.py`, registered on the existing `
 | `smoke <model>` | the smoke check (D5) |
 | `parity <model>` | the parity gate (D6) |
 
-**State and secrets.** `RUNPOD_API_KEY` (a management key) comes from the environment. Endpoint and template ids are written to `.runpod/state.yaml` (gitignored) and to the release record, never to git. The committed release log `configs/runpod/releases.yaml` holds per model: date, git sha, image digest, config hash, model revision, vLLM version, who deployed, parity result — no ids. Worker-side secrets are not needed (weights are baked, no HF token at runtime); if one ever is, it is a Runpod Secret referenced as `{{ RUNPOD_SECRET_<name> }}` in the template, never a literal.
+**State and secrets.** `RUNPOD_API_KEY` (a management key) comes from the environment; locally `ocrbench` loads it from the gitignored `./.env` at startup (see `.env.example`), without overriding a variable already set, so a CI repository secret wins. Endpoint and template ids are written to `.runpod/state.yaml` (gitignored) and to the release record, never to git. The committed release log `configs/runpod/releases.yaml` holds per model: date, git sha, image digest, config hash, model revision, vLLM version, who deployed, parity result — no ids. Worker-side secrets are not needed (weights are baked, no HF token at runtime); if one ever is, it is a Runpod Secret referenced as `{{ RUNPOD_SECRET_<name> }}` in the template, never a literal.
 
 **Idempotency.** Templates are immutable releases: a new config hash or digest creates a new template; the endpoint is `PATCH`ed to it. Deploying the same digest and hash twice is a no-op. Scaling-only changes `PATCH` the endpoint without a new template.
 

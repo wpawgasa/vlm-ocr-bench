@@ -188,3 +188,35 @@ def test_unpromoted_override_does_not_cover_statements(tmp_path, monkeypatch):
     monkeypatch.setenv("OCRBENCH_ALLOW_UNPROMOTED", "1")
     _stub_connect(monkeypatch)
     assert _infer().exit_code == 2
+
+
+def _invoke_with_env_file(tmp_path, monkeypatch, content: str):
+    env_file = tmp_path / ".env"
+    env_file.write_text(content)
+    monkeypatch.setattr("ocr_bench.cli.ENV_FILE", env_file)
+    monkeypatch.setenv("OCRBENCH_DATA_DIR", str(tmp_path))
+    return runner.invoke(app, ["score", "--run-id", "x"])
+
+
+def test_env_file_sets_unset_variable(tmp_path, monkeypatch):
+    import os
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "placeholder")  # records the original for undo
+    monkeypatch.delenv("RUNPOD_API_KEY")
+    _invoke_with_env_file(tmp_path, monkeypatch, "RUNPOD_API_KEY=from-dotenv\n")
+    assert os.environ["RUNPOD_API_KEY"] == "from-dotenv"
+
+
+def test_env_file_does_not_override_environment(tmp_path, monkeypatch):
+    import os
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "from-environment")
+    _invoke_with_env_file(tmp_path, monkeypatch, "RUNPOD_API_KEY=from-dotenv\n")
+    assert os.environ["RUNPOD_API_KEY"] == "from-environment"
+
+
+def test_missing_env_file_is_ignored(tmp_path, monkeypatch):
+    monkeypatch.setattr("ocr_bench.cli.ENV_FILE", tmp_path / "absent.env")
+    monkeypatch.setenv("OCRBENCH_DATA_DIR", str(tmp_path))
+    result = runner.invoke(app, ["score", "--run-id", "x"])
+    assert result.exit_code == 2  # the missing-manifest error, not a .env error

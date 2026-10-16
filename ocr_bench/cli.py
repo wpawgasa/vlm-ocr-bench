@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 import typer
 import yaml
+from dotenv import load_dotenv
 
 from ocr_bench.confidence.calibrate import run_calibrate
 from ocr_bench.config import (
@@ -74,6 +75,14 @@ app = typer.Typer(
 )
 
 DEFAULT_CONFIG_PATH = Path("configs/run.yaml")
+ENV_FILE = Path(".env")
+
+
+@app.callback()
+def _load_env_file() -> None:
+    # Secrets such as RUNPOD_API_KEY live in the gitignored ./.env; a variable already set
+    # in the environment (e.g. a CI repository secret) wins over the file.
+    load_dotenv(ENV_FILE, override=False)
 
 
 def _csv(s: str) -> list[str]:
