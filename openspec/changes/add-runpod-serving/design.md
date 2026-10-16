@@ -226,4 +226,4 @@ Written as requirements in `specs/client-data-safeguards/spec.md`; the design be
 4. Who is the production client — the docparse FastAPI service, or a separate client application — and does it need anything beyond the base URL + key contract?
 5. Alerting channel for a failing smoke (workflow e-mail is the default; Slack/Line webhook needs a secret).
 6. Is a dropped-request behaviour during bursts (no queue) acceptable for the production caller, or should it front the endpoint with its own queue?
-7. Monthly budget and the Runpod spend limit value.
+7. Monthly budget and the Runpod spend limit value. *Partly resolved 2026-10-16:* Runpod offers no user-set cap; the account runs under Runpod's own default limit ($80/h at retrieval time). Auto-pay is on: when the balance drops below $100 it is refilled to $150, so endpoints never stop for lack of credit, and nothing caps total spend except that hourly limit. The real bound is per-endpoint `workers_max: 3` (≈$2/h at 24 GB pricing). Still open: the monthly budget figure, and whether a billing-page review or alert should accompany each `--promote`.
