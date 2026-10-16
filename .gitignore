@@ -12,6 +12,8 @@ build/
 # Env / secrets
 .env
 .devcontainer/.env
+# Runpod endpoint/template/registry-credential ids (design D4), never in git
+/.runpod/
 
 # Benchmark artefacts (bank statements are client data — never commit)
 /runs/

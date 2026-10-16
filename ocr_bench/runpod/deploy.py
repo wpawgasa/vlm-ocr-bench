@@ -135,17 +135,30 @@ def check_config(
     return bare
 
 
+def registry_credential(state: dict[str, Any]) -> str:
+    """The Runpod registry credential id the private images are pulled with (task 5.2)."""
+    cred = state.get("registry_credential_id")
+    if not cred:
+        raise DeployRefused(
+            "registry_credential_id is not set in .runpod/state.yaml; the worker images are "
+            "private, so add the Runpod registry credential id there (task 5.2)"
+        )
+    return str(cred)
+
+
 def dry_run_bodies(
     cfg: RunpodModelConfig,
     digest: str,
     allowed_data_centers: list[str],
     profile: Profile | None = None,
-    entry: dict[str, Any] | None = None,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The template and endpoint bodies a deploy would send, after the local refusals."""
-    bare = check_config(cfg, digest, allowed_data_centers, entry or {})
+    state = state or {}
+    entry = (state.get("endpoints") or {}).get(endpoint_name(cfg)) or {}
+    bare = check_config(cfg, digest, allowed_data_centers, entry)
     return {
-        "template": template_body(cfg, bare),
+        "template": template_body(cfg, bare, registry_credential(state)),
         "endpoint": endpoint_body(cfg, "<template-id>", profile),
     }
 
@@ -208,6 +221,7 @@ def deploy(
     state = runpod_state.load_state(state_path)
     entry = dict((state.get("endpoints") or {}).get(name) or {})
     bare = check_config(cfg, digest, allowed_data_centers, entry)
+    registry = registry_credential(state)
     if profile == "office" and not entry.get("client_data"):
         raise DeployRefused(
             f"{cfg.model}: the office profile is only for a promoted endpoint; "
@@ -235,7 +249,7 @@ def deploy(
     if existing is not None:
         _check_existing(cfg, existing, entry)
 
-    template, _ = _find_or_create_template(api, cfg, template_body(cfg, bare), bare)
+    template, _ = _find_or_create_template(api, cfg, template_body(cfg, bare, registry), bare)
     desired = endpoint_body(cfg, template["id"], profile)
     changed: list[str] = []
     if existing is None:

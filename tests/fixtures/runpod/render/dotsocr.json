@@ -25,11 +25,12 @@
   },
   "template": {
     "disk": 30,
-    "image": "ghcr.io/wpawgasa/vlm-ocr-bench/runpod-dotsocr@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "image": "code.loolootech.com/loolootech/runpod-dotsocr@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "name": "ocrbench-dotsocr-873af0a1",
     "ports": [
       "8000/http"
     ],
+    "registry": "cred-test-id",
     "serverless": true
   }
 }

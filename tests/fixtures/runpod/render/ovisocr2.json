@@ -25,11 +25,12 @@
   },
   "template": {
     "disk": 30,
-    "image": "ghcr.io/wpawgasa/vlm-ocr-bench/runpod-ovisocr2@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "image": "code.loolootech.com/loolootech/runpod-ovisocr2@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "name": "ocrbench-ovisocr2-4bbfc488",
     "ports": [
       "8000/http"
     ],
+    "registry": "cred-test-id",
     "serverless": true
   }
 }
