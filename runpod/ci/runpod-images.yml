@@ -1,7 +1,7 @@
 name: Runpod images
 
-# Builds the weights-baked worker image per model (design D2) and pushes it to a private
-# GHCR package. Templates reference the pushed digest (printed in the job summary), never a tag.
+# Builds the weights-baked worker image per model (design D2) and pushes it to the private
+# code.loolootech.com registry (open question 3); Runpod pulls with its registry credential. Templates reference the pushed digest (printed in the job summary), never a tag.
 on:
   push:
     branches: [main]
@@ -17,10 +17,9 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 env:
-  REGISTRY_PREFIX: ghcr.io/wpawgasa/vlm-ocr-bench/runpod-
+  REGISTRY_PREFIX: code.loolootech.com/loolootech/runpod-
 
 jobs:
   plan:
@@ -59,9 +58,9 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: code.loolootech.com
+          username: ${{ secrets.LOOLOO_REGISTRY_USER }}
+          password: ${{ secrets.LOOLOO_REGISTRY_TOKEN }}
       - name: Build and push
         id: build
         uses: docker/build-push-action@v6

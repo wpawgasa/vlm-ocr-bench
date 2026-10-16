@@ -68,12 +68,14 @@ def test_workflow_triggers():
 def test_workflow_builds_pushes_and_summarises():
     text = WORKFLOW.read_text()
     assert "docker/build-push-action" in text
-    assert "ghcr.io/wpawgasa/vlm-ocr-bench/runpod-" in text
+    assert "code.loolootech.com/loolootech/runpod-" in text
+    assert "secrets.LOOLOO_REGISTRY_USER" in text
+    assert "secrets.LOOLOO_REGISTRY_TOKEN" in text
     assert "github.sha" in text
     assert "HF_TOKEN=${{ secrets.HF_TOKEN }}" in text
     assert "GITHUB_STEP_SUMMARY" in text
     assert "steps.build.outputs.digest" in text
-    assert _wf()["permissions"]["packages"] == "write"
+    assert _wf()["permissions"] == {"contents": "read"}  # the registry is not GHCR
 
 
 @pytest.mark.skipif(shutil.which("actionlint") is None, reason="actionlint not installed")

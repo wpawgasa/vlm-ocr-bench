@@ -9,6 +9,7 @@ from ocr_bench.runpod.render import endpoint_body, template_body
 from tests.runpod_helpers import MODELS, pinned_configs
 
 DIGEST = "sha256:" + "c" * 64
+CRED = "cred-test-id"
 SNAPSHOTS = Path(__file__).parent / "fixtures" / "runpod" / "render"
 
 
@@ -16,7 +17,7 @@ SNAPSHOTS = Path(__file__).parent / "fixtures" / "runpod" / "render"
 def test_rendered_bodies_match_snapshot(model, tmp_path):
     cfg = load_runpod_config(pinned_configs(tmp_path) / f"{model}.yaml")
     rendered = {
-        "template": template_body(cfg, DIGEST),
+        "template": template_body(cfg, DIGEST, CRED),
         "endpoint": endpoint_body(cfg, "tmpl-id", None),
     }
     snap = SNAPSHOTS / f"{model}.json"
@@ -28,7 +29,7 @@ def test_rendered_bodies_match_snapshot(model, tmp_path):
 
 def test_template_name_carries_config_hash_and_image_is_digest_pinned(tmp_path):
     cfg = load_runpod_config(pinned_configs(tmp_path) / "dotsocr.yaml")
-    body = template_body(cfg, DIGEST)
+    body = template_body(cfg, DIGEST, CRED)
     assert body["name"] == f"ocrbench-dotsocr-{config_hash(cfg)[:8]}"
     assert body["image"].endswith(f"runpod-dotsocr@{DIGEST}")
 
@@ -43,4 +44,11 @@ def test_profiles_set_min_workers(tmp_path):
 def test_template_rejects_a_tag(tmp_path):
     cfg = load_runpod_config(pinned_configs(tmp_path) / "dotsocr.yaml")
     with pytest.raises(ValueError, match="digest"):
-        template_body(cfg, "latest")
+        template_body(cfg, "latest", CRED)
+
+
+def test_template_pulls_from_the_private_registry_with_the_credential(tmp_path):
+    cfg = load_runpod_config(pinned_configs(tmp_path) / "dotsocr.yaml")
+    body = template_body(cfg, DIGEST, CRED)
+    assert body["image"] == f"code.loolootech.com/loolootech/runpod-dotsocr@{DIGEST}"
+    assert body["registry"] == CRED

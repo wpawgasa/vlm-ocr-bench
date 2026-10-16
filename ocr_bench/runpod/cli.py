@@ -99,7 +99,7 @@ def render(
     typer.echo(shlex.join([*argv, *render_vllm_argv(cfg)]))
     try:
         bodies = {
-            "template": template_body(cfg, digest),
+            "template": template_body(cfg, digest, "<registry-credential-id>"),
             "endpoint": endpoint_body(cfg, "<template-id>", profile),  # type: ignore[arg-type]
         }
     except ValueError as e:
@@ -179,10 +179,8 @@ def deploy(
     allowed = load_allowed_data_centers(configs_dir / "data_centers.yaml")
     try:
         if digest is not None and dry_run:
-            entry = (runpod_state.load_state(state_path).get("endpoints") or {}).get(
-                endpoint_name(cfg), {}
-            )
-            bodies = dry_run_bodies(cfg, digest, allowed, profile=profile, entry=entry)  # type: ignore[arg-type]
+            state = runpod_state.load_state(state_path)
+            bodies = dry_run_bodies(cfg, digest, allowed, profile=profile, state=state)  # type: ignore[arg-type]
             typer.echo(json.dumps(bodies, indent=2, sort_keys=True))
             return
         if digest is not None:

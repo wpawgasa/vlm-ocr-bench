@@ -25,6 +25,7 @@ DIGEST = "sha256:" + "c" * 64
 DIGEST2 = "sha256:" + "e" * 64
 KEY = "test-management-key"
 ALLOWED = ["EU-RO-1", "EU-SE-1"]
+CRED = "cred-test-id"
 
 
 @pytest.fixture
@@ -32,7 +33,19 @@ def configs(tmp_path) -> Path:
     cdir = pinned_configs(tmp_path / "c")
     (cdir / "data_centers.yaml").write_text(yaml.safe_dump({"data_centers": ALLOWED}))
     _edit(cdir, data_centers=["EU-RO-1"])
+    # The registry credential (task 5.2) sits in both state paths the tests use.
+    for state_path in (tmp_path / ".runpod" / "state.yaml", tmp_path / "state.yaml"):
+        _write_state(state_path, {})
     return cdir
+
+
+def _write_state(path: Path, state: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump({"registry_credential_id": CRED, **state}))
+
+
+def _no_endpoints(path: Path) -> bool:
+    return not load_state(path).get("endpoints")
 
 
 def _edit(cdir: Path, model: str = "dotsocr", **endpoint) -> None:
@@ -241,7 +254,25 @@ def _refused(configs, tmp_path, match, digest=DIGEST, fake=None):
         _deploy(configs, fake, tmp_path, digest=digest)
     assert fake.writes == []
     assert not (tmp_path / "releases.yaml").exists()
-    assert not (tmp_path / ".runpod" / "state.yaml").exists()
+    assert _no_endpoints(tmp_path / ".runpod" / "state.yaml")
+
+
+def test_refuses_without_a_registry_credential(configs, tmp_path):
+    (tmp_path / ".runpod" / "state.yaml").write_text(yaml.safe_dump({}))
+    _refused(configs, tmp_path, "registry_credential_id")
+
+
+def test_cli_dry_run_refuses_without_a_registry_credential(configs, tmp_path):
+    (tmp_path / "state.yaml").unlink()
+    result = _cli(configs, tmp_path, "--digest", DIGEST, "--dry-run")
+    assert result.exit_code == 2
+    assert "registry_credential_id" in result.output
+
+
+def test_created_template_uses_the_registry_credential(configs, tmp_path):
+    fake = FakeRunpod()
+    _deploy(configs, fake, tmp_path)
+    assert fake.templates[0]["registry"] == CRED
 
 
 def test_refuses_empty_data_centers(configs, tmp_path):
@@ -339,10 +370,9 @@ def test_network_volume_allowed_on_queue_config(configs, tmp_path):
 
 def test_network_volume_refused_on_promoted_queue_endpoint(configs, tmp_path):
     _edit(configs, kind="queue", network_volume="vol-shared")
-    state_path = tmp_path / ".runpod" / "state.yaml"
-    state_path.parent.mkdir()
-    state_path.write_text(
-        yaml.safe_dump({"endpoints": {"ocrbench-dotsocr": {"id": "e0", "client_data": True}}})
+    _write_state(
+        tmp_path / ".runpod" / "state.yaml",
+        {"endpoints": {"ocrbench-dotsocr": {"id": "e0", "client_data": True}}},
     )
     fake = FakeRunpod()
     with pytest.raises(dp.DeployRefused, match="vol-shared"):
@@ -378,9 +408,10 @@ def test_cli_dry_run_prints_bodies_without_network(configs, tmp_path, monkeypatc
     assert result.exit_code == 0, result.output
     bodies = json.loads(result.output)
     assert bodies["template"]["image"].endswith(DIGEST)
+    assert bodies["template"]["registry"] == CRED
     assert bodies["endpoint"]["type"] == "load_balancer"
     assert bodies["endpoint"]["templateId"] == "<template-id>"
-    assert not (tmp_path / "state.yaml").exists()
+    assert _no_endpoints(tmp_path / "state.yaml")
 
 
 def test_cli_dry_run_still_applies_refusals(configs, tmp_path):
