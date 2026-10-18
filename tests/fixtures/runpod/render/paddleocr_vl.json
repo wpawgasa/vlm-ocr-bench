@@ -25,11 +25,12 @@
   },
   "template": {
     "disk": 30,
-    "image": "ghcr.io/wpawgasa/vlm-ocr-bench/runpod-paddleocr_vl@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "image": "code.loolootech.com/loolootech/runpod-paddleocr_vl@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "name": "ocrbench-paddleocr_vl-d8e06535",
     "ports": [
       "8000/http"
     ],
+    "registry": "cred-test-id",
     "serverless": true
   }
 }

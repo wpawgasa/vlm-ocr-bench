@@ -25,11 +25,12 @@
   },
   "template": {
     "disk": 30,
-    "image": "ghcr.io/wpawgasa/vlm-ocr-bench/runpod-typhoon_ocr15@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "image": "code.loolootech.com/loolootech/runpod-typhoon_ocr15@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "name": "ocrbench-typhoon_ocr15-9d7fb250",
     "ports": [
       "8000/http"
     ],
+    "registry": "cred-test-id",
     "serverless": true
   }
 }

@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from ocr_bench.runpod.config import RunpodModelConfig, config_hash
 
-IMAGE_REPO_PREFIX = "ghcr.io/wpawgasa/vlm-ocr-bench/runpod-"
+IMAGE_REPO_PREFIX = "code.loolootech.com/loolootech/runpod-"
 Profile = Literal["office", "off"]
 
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -24,8 +24,9 @@ def template_name(cfg: RunpodModelConfig) -> str:
     return f"ocrbench-{cfg.model}-{config_hash(cfg)[:8]}"
 
 
-def template_body(cfg: RunpodModelConfig, digest: str) -> dict[str, Any]:
-    """Immutable template for one release: the image is pinned by digest, never a tag."""
+def template_body(cfg: RunpodModelConfig, digest: str, registry: str) -> dict[str, Any]:
+    """Immutable template for one release: the image is pinned by digest, never a tag, and
+    pulled from the private registry with the Runpod registry credential id `registry`."""
     if not _SHA256_RE.match(digest):
         raise ValueError(f"image must be pinned by a sha256 digest, not a tag: {digest!r}")
     return {
@@ -34,6 +35,7 @@ def template_body(cfg: RunpodModelConfig, digest: str) -> dict[str, Any]:
         "disk": cfg.endpoint.container_disk_gb,
         "ports": ["8000/http"],
         "serverless": True,
+        "registry": registry,
     }
 
 
