@@ -6,7 +6,7 @@ another project. Requirements: `pip install httpx pillow pypdfium2` (plus
 `opencv-python-headless numpy` for TeleOCR pages with polygon layout blocks).
 
     export DOTSOCR_BASE_URL=https://<endpoint-id>.api.runpod.ai/v1
-    export DOTSOCR_API_KEY=<the endpoint's restricted Runpod key>
+    export DOTSOCR_API_KEY=<the restricted client key: Serverless Read/Write, no management access>
     python scripts/runpod_parse_document.py --model dotsocr statement.pdf -o statement.md
     python scripts/runpod_parse_document.py --model typhoon_ocr15 page1.png page2.jpg
 

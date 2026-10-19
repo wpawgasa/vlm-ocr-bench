@@ -39,7 +39,7 @@ Markdown:
 
 ```bash
 export TYPHOON_BASE_URL=https://<endpoint-id>.api.runpod.ai/v1
-export TYPHOON_API_KEY=<the endpoint's restricted Runpod key>   # falls back to $RUNPOD_API_KEY
+export TYPHOON_API_KEY=<the restricted client key: Serverless Read/Write, no management access>   # falls back to $RUNPOD_API_KEY
 python scripts/runpod_parse_document.py --model typhoon_ocr15 statement.pdf -o statement.md
 ```
 

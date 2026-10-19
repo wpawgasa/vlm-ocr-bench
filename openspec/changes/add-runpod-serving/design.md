@@ -146,7 +146,7 @@ A typer command group in `ocr_bench/runpod/cli.py`, registered on the existing `
 ### D5. Client access, retries and cold starts
 Environment contract for any client, harness or production service (all per model):
 - `<MODEL>_BASE_URL` (the existing `endpoint_env`), e.g. `https://<id>.api.runpod.ai/v1`;
-- `<MODEL>_API_KEY`: the restricted Runpod key for that endpoint; falls back to `OPENAI_API_KEY`, then `EMPTY` (self-hosted);
+- `<MODEL>_API_KEY`: the Runpod key clients use for that endpoint. Today this is the one shared restricted key described under D9 "Keys". falls back to `OPENAI_API_KEY`, then `EMPTY` (self-hosted);
 - `OCRBENCH_ENDPOINT_WAIT_S` (default 0): how long `health()` may wait for a worker to become ready.
 
 `VllmClient` and `PipelineClient` changes (`ocr_bench/models/vllm_client.py`, `pipeline_client.py`, `registry.build_model`):
@@ -190,7 +190,7 @@ Written as requirements in `specs/client-data-safeguards/spec.md`; the design be
 | Images only in memory, nothing persisted | no network volume on client-data endpoints, `HF_HUB_OFFLINE=1`, `--mm-processor-cache-gb 0`, `--download-dir` unset, writable paths only `/tmp` for vLLM's compile cache; the Paddle front never writes `file` payloads to disk (the pipeline is invoked in memory; `visualize: false`) |
 | Platform stores no payloads | load-balancing endpoints (D1); if `kind: queue` is ever used, the audit must state the retention and the endpoint is not promotable |
 | TLS | the client refuses `http://` for `*.api.runpod.ai`; the gateway is HTTPS only |
-| Keys | restricted per-endpoint Runpod keys (read-write on that endpoint only); management key separate; keys only in env, `.runpod/` (gitignored), GitHub Actions secrets; `gitleaks` pre-commit and CI rule for `rpa_[A-Za-z0-9]{20,}` and `[a-z0-9]{14}\.api\.runpod\.ai` |
+| Keys | one shared *restricted* client key: Serverless Read/Write, no REST/GraphQL management access, so it can call endpoints but can't create, change or delete them. The management key is separate. *Revised 2026-10-19:* Runpod's restricted keys offer no per-endpoint scope for load-balancing endpoints, so the client key can call every endpoint on the account. Before production, per-endpoint isolation needs a worker-side check: a per-endpoint secret in a second header, compared in the entrypoint or Paddle front against a Runpod Secret in the template. keys only in env, `.runpod/` (gitignored), GitHub Actions secrets; `gitleaks` pre-commit and CI rule for `rpa_[A-Za-z0-9]{20,}` and `[a-z0-9]{14}\.api\.runpod\.ai` |
 | Region / tenancy | `data_centers` must be a non-empty subset of the allow-list in `configs/runpod/data_centers.yaml` (approved by the Human review; Secure Cloud only, compliance-filtered GPUs) |
 | Terms reviewed by a human | `docs/runpod-data-processing-review.md`: date, reviewer, documents (DPA, ToS, Trust Center reports, region statement), decision, conditions, next review date; `deploy --promote` refuses while the file's decision is not `approved` or is older than 12 months |
 | Audit of endpoints allowed client data | `.runpod/state.yaml` holds `client_data: true|false`, `approved_by`, `approved_on` per endpoint (ids live here, gitignored); `configs/runpod/releases.yaml` carries the promotion (name, date, parity verdict) without ids; `ocrbench infer`/the production client refuse to send a `bankstmt` page to an endpoint not promoted, unless `OCRBENCH_ALLOW_UNPROMOTED=1` is set *and* the source is not client data |
@@ -212,7 +212,7 @@ Written as requirements in `specs/client-data-safeguards/spec.md`; the design be
 ## Migration Plan
 
 1. Land the code (config schema, image, entrypoint, client changes, CLI) with unit tests; nothing is deployed yet and self-hosted serving is unchanged.
-2. Human: Runpod account, spend limit, restricted keys, registry credential, data-centre allow-list, DPA review document.
+2. Human: Runpod account, spend limit, the shared restricted client key, registry credential, data-centre allow-list, DPA review document.
 3. Build and push the five images; deploy each endpoint with `workers_min: 0`; smoke each.
 4. Record the parity references on the H100 (one session, all five models); run the parity gate against each endpoint; fix or re-pin until it passes.
 5. Promote only the models the user picks for client traffic; set the office profile; enable the scheduled smoke.
