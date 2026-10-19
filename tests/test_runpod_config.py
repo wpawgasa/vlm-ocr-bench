@@ -11,6 +11,7 @@ from ocr_bench.runpod.config import (
     load_runpod_config,
     render_vllm_argv,
 )
+from ocr_bench.runpod.review import load_review
 
 DIGEST = "sha256:" + "a" * 64
 REV = "b" * 40
@@ -215,7 +216,24 @@ def test_base_image_pinned_to_digest_of_its_vllm_version(model):
     assert image["base"] == "vllm/vllm-openai@" + _PINNED_BASE[image["vllm_version"]]
 
 
-def test_data_centers_allow_list_is_empty_and_points_at_review():
-    text = (RUNPOD_DIR / "data_centers.yaml").read_text()
-    assert yaml.safe_load(text) == {"data_centers": []}
-    assert "runpod-data-processing-review.md" in text
+def _allow_list() -> list[str]:
+    return yaml.safe_load((RUNPOD_DIR / "data_centers.yaml").read_text())["data_centers"]
+
+
+def test_data_centers_allow_list_is_filled_and_points_at_review():
+    assert _allow_list()
+    assert len(set(_allow_list())) == len(_allow_list())
+    assert "runpod-data-processing-review.md" in (RUNPOD_DIR / "data_centers.yaml").read_text()
+
+
+@pytest.mark.parametrize("model", COMPOSE_SERVICE)
+def test_model_data_centers_are_a_non_empty_subset_of_the_allow_list(model):
+    dcs = yaml.safe_load((RUNPOD_DIR / f"{model}.yaml").read_text())["endpoint"]["data_centers"]
+    assert dcs
+    assert set(dcs) <= set(_allow_list())
+
+
+def test_data_processing_review_is_approved():
+    review = load_review(REPO / "docs" / "runpod-data-processing-review.md")
+    assert review.problem(review.reviewed_on) is None
+    assert review.next_review and review.next_review > review.reviewed_on

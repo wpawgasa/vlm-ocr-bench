@@ -221,7 +221,7 @@ Written as requirements in `specs/client-data-safeguards/spec.md`; the design be
 ## Open Questions
 
 1. Which models should actually be promoted to client traffic first? dots.ocr, typhoon-ocr1.5 and PaddleOCR-VL read Thai; TeleOCR and OvisOCR2 failed the Thai gate. This design deploys all five but promotes none by itself.
-2. Data-centre allow-list: EU regions carry Runpod's GDPR statement; AP-JP-1 would be closest to Thailand but its serverless availability and compliance scope are unverified. A legal/latency decision for the Human review.
+2. Data-centre allow-list: EU regions carry Runpod's GDPR statement; AP-JP-1 would be closest to Thailand but its serverless availability and compliance scope are unverified. A legal/latency decision for the Human review. *Experimental scope decided 2026-10-19:* the data owner approved sending this repo's statements to Runpod outside Thailand for experiments; the allow-list is the ten Europe/North-America data centres with a configured 24 GB GPU (`docs/runpod-data-processing-review.md`). The production decision stays with #139.
 3. Registry: private GHCR packages with a Runpod registry credential (assumed), or Runpod's own registry support / Docker Hub? *Resolved 2026-10-16:* the private `code.loolootech.com` registry, images under `loolootech/runpod-<model>`, pulled with the existing Runpod credential named `code.loolootech.com`.
 4. Who is the production client — the docparse FastAPI service, or a separate client application — and does it need anything beyond the base URL + key contract?
 5. Alerting channel for a failing smoke (workflow e-mail is the default; Slack/Line webhook needs a secret).
