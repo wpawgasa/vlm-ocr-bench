@@ -8,7 +8,7 @@ image:
   variant: paddle
 weights:
   repo: PaddlePaddle/PaddleOCR-VL-1.6
-  revision: REQUIRED
+  revision: c5630abae1d940eafe0697512a0325494b02ab42
 vllm_args:
   trust-remote-code: true
   dtype: bfloat16

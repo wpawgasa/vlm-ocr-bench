@@ -197,10 +197,19 @@ def test_variants_and_paddle_memory():
 
 
 @pytest.mark.parametrize("model", COMPOSE_SERVICE)
-def test_shipped_config_fails_on_revision_placeholder(model):
-    assert _shipped(model)["weights"]["revision"] == "REQUIRED"
+def test_shipped_config_pins_a_weights_commit(model):
+    assert re.fullmatch(r"[0-9a-f]{40}", _shipped(model)["weights"]["revision"])
+    assert "REQUIRED" not in (RUNPOD_DIR / f"{model}.yaml").read_text()
+    load_runpod_config(RUNPOD_DIR / f"{model}.yaml")
+
+
+def test_revision_placeholder_is_rejected(tmp_path):
+    path = tmp_path / "dotsocr.yaml"
+    raw = _shipped("dotsocr")
+    raw["weights"]["revision"] = "REQUIRED"
+    path.write_text(yaml.safe_dump(raw))
     with pytest.raises(ValidationError) as exc:
-        load_runpod_config(RUNPOD_DIR / f"{model}.yaml")
+        load_runpod_config(path)
     assert ("weights", "revision") in {e["loc"] for e in exc.value.errors()}
 
 

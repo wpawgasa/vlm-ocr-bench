@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import stat
 from pathlib import Path
 
@@ -66,9 +67,11 @@ def test_build_push_pushes_then_prints_digest(fake_docker, tmp_path):
     assert IMAGE_DIGEST in result.output
 
 
-def test_build_unpinned_revision_exits_nonzero_without_calling_docker(fake_docker):
-    # the shipped configs still carry `revision: REQUIRED`
-    result = runner.invoke(app, ["runpod", "build", "teleocr"])
+def test_build_unpinned_revision_exits_nonzero_without_calling_docker(fake_docker, tmp_path):
+    configs = pinned_configs(tmp_path / "c")
+    path = configs / "teleocr.yaml"
+    path.write_text(re.sub(r"revision: \S+", "revision: REQUIRED", path.read_text(), count=1))
+    result = runner.invoke(app, ["runpod", "build", "teleocr", "--configs-dir", str(configs)])
     assert result.exit_code != 0
     assert not fake_docker.exists()
 

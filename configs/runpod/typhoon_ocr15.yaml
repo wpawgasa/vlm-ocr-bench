@@ -1,5 +1,5 @@
 # Runpod serving facts for typhoon-ocr1.5-2b (design D2); compose service `typhoon`.
-# weights.revision stays REQUIRED (fails validation) until task 5.4 pins the commit.
+# weights.revision is the Hugging Face commit pinned by task 5.4 (2026-10-19).
 model: typhoon_ocr15
 image:
   base: vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c
@@ -7,7 +7,7 @@ image:
   variant: plain
 weights:
   repo: typhoon-ai/typhoon-ocr1.5-2b
-  revision: REQUIRED
+  revision: 15b381a2d62569e6736f9c085859dff68e48608d
 vllm_args:
   dtype: bfloat16
   max-model-len: 16384
