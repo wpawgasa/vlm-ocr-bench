@@ -138,22 +138,29 @@ def test_v1_post_streams_response_body(client, upstreams):
     assert json.loads(vllm.bodies[0]) == {"stream": True}
 
 
-def test_health_200_when_vllm_and_all_pipelines_healthy(client):
-    assert client.get("/health").status_code == 200
+# Runpod's load balancer polls /ping (live worker logs, 2026-10-19); /health is the same.
+READINESS = pytest.mark.parametrize("path", ["/ping", "/health"])
 
 
-def test_health_204_while_one_pipeline_down(client, upstreams):
+@READINESS
+def test_health_200_when_vllm_and_all_pipelines_healthy(client, path):
+    assert client.get(path).status_code == 200
+
+
+@READINESS
+def test_health_204_while_one_pipeline_down(client, upstreams, path):
     _, pipes = upstreams
     pipes[1].healthy = False
-    r = client.get("/health")
+    r = client.get(path)
     assert r.status_code == 204
     assert r.content == b""
 
 
-def test_health_204_while_vllm_down(client, upstreams):
+@READINESS
+def test_health_204_while_vllm_down(client, upstreams, path):
     vllm, _ = upstreams
     vllm.healthy = False
-    assert client.get("/health").status_code == 204
+    assert client.get(path).status_code == 204
 
 
 def test_health_204_when_pipeline_unreachable(upstreams):

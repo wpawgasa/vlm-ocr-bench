@@ -23,9 +23,10 @@ def image_repo(model: str) -> str:
 
 
 # The port each image stage listens on (`ENV PORT` in runpod/Dockerfile). Runpod's load
-# balancer reads PORT/PORT_HEALTH from the endpoint env (default 80), not from the image.
+# balancer reads PORT/PORT_HEALTH from the endpoint env (default 80), not from the image, and
+# polls `/ping` there (it ignored HEALTH_CHECK_PATH on 2026-10-19): vLLM serves /ping, and so
+# does the Paddle front (200 ready, 204 starting).
 _STAGE_PORTS = {"plain": 8000, "teleocr": 8000, "paddle": 8080}
-HEALTH_PATH = "/health"  # vLLM and the Paddle front: 200 ready, 204 starting
 
 
 def worker_port(variant: str) -> int:
@@ -47,7 +48,7 @@ def template_body(cfg: RunpodModelConfig, digest: str, registry: str) -> dict[st
         "image": f"{image_repo(cfg.model)}@{digest}",
         "disk": cfg.endpoint.container_disk_gb,
         "ports": [f"{port}/http"],
-        "env": {"PORT": str(port), "PORT_HEALTH": str(port), "HEALTH_CHECK_PATH": HEALTH_PATH},
+        "env": {"PORT": str(port), "PORT_HEALTH": str(port)},
         "serverless": True,
         "registry": registry,
     }

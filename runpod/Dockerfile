@@ -35,7 +35,6 @@ snapshot_download(repo_id=repo, revision=rev, local_dir='/models/' + repo, token
 ENV HF_HUB_OFFLINE=1 \
     PORT=8000 \
     OCRBENCH_MODEL=${MODEL} \
-    HEALTH_CHECK_PATH=/health \
     PYTHONPATH=/app
 EXPOSE 8000
 ENTRYPOINT ["python3", "/app/entrypoint.py"]

@@ -83,8 +83,5 @@ def test_template_tells_the_load_balancer_the_worker_port(model, port, tmp_path)
     cfg = load_runpod_config(pinned_configs(tmp_path) / f"{model}.yaml")
     body = template_body(cfg, DIGEST, CRED)
     assert body["ports"] == [f"{port}/http"]
-    assert body["env"] == {
-        "PORT": str(port),
-        "PORT_HEALTH": str(port),
-        "HEALTH_CHECK_PATH": "/health",
-    }
+    # The load balancer polls /ping (vLLM serves it; so does the Paddle front).
+    assert body["env"] == {"PORT": str(port), "PORT_HEALTH": str(port)}

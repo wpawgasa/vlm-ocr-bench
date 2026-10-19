@@ -2,8 +2,9 @@
 
 - `POST /layout-parsing` goes round-robin to the pipeline processes on 127.0.0.1:8081...;
 - `/v1/*` and `/version` are reverse-proxied to the loopback vLLM, bodies streamed both ways;
-- `GET /health` is 200 only when vLLM and every pipeline answer 200 on /health, else 204, so
-  Runpod's load balancer sees one readiness signal.
+- `GET /ping` (what Runpod's load balancer polls) and `GET /health` are 200 only when vLLM
+  and every pipeline answer 200 on /health, else 204, so the balancer sees one readiness
+  signal.
 
 The access log is one line per request, `METHOD PATH STATUS BYTES MSms`: no query string, no
 headers, no bodies (they may hold client documents).
@@ -127,6 +128,7 @@ def create_app(vllm_url: str, pipelines: list[str]) -> FastAPI:
     async def version(request: Request) -> Response:
         return await proxy(request, vllm_url)
 
+    @app.get("/ping")
     @app.get("/health")
     async def health(request: Request) -> Response:
         client: httpx.AsyncClient = request.app.state.client

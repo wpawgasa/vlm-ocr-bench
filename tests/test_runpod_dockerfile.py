@@ -62,9 +62,9 @@ def test_plain_env_defaults():
         "HF_HUB_OFFLINE=1",
         "PORT=8000",
         "OCRBENCH_MODEL=${MODEL}",
-        "HEALTH_CHECK_PATH=/health",
     ):
         assert item in plain
+    assert "HEALTH_CHECK_PATH" not in plain  # Runpod polls /ping regardless
 
 
 def test_teleocr_repeats_devcontainer_install_with_same_commit():
