@@ -1,7 +1,9 @@
 {
   "endpoint": {
     "allowedCudaVersions": [
-      "12.8"
+      "12.8",
+      "12.9",
+      "13.0"
     ],
     "dataCenterIds": [
       "EU-RO-1",

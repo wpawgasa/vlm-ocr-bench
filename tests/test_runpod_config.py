@@ -246,3 +246,11 @@ def test_data_processing_review_is_approved():
     review = load_review(REPO / "docs" / "runpod-data-processing-review.md")
     assert review.problem(review.reviewed_on) is None
     assert review.next_review and review.next_review > review.reviewed_on
+
+
+@pytest.mark.parametrize("cuda_min", ["12", "12.10", "14.0"])
+def test_cuda_min_must_be_a_runpod_cuda_version(cuda_min):
+    raw = _raw()
+    raw["endpoint"]["cuda_min"] = cuda_min
+    with pytest.raises(ValidationError, match="cuda_min"):
+        RunpodModelConfig.model_validate(raw)

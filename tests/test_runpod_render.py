@@ -52,3 +52,9 @@ def test_template_pulls_from_the_private_registry_with_the_credential(tmp_path):
     body = template_body(cfg, DIGEST, CRED)
     assert body["image"] == f"code.loolootech.com/loolootech/runpod-dotsocr@{DIGEST}"
     assert body["registry"] == CRED
+
+
+def test_cuda_min_allows_that_version_and_every_newer_one(tmp_path):
+    cfg = load_runpod_config(pinned_configs(tmp_path) / "dotsocr.yaml")
+    assert cfg.endpoint.cuda_min == "12.8"
+    assert endpoint_body(cfg, "t", None)["allowedCudaVersions"] == ["12.8", "12.9", "13.0"]

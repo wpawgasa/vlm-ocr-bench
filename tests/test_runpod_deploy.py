@@ -126,7 +126,7 @@ def test_first_deploy_creates_template_and_endpoint(configs, tmp_path):
     assert ep_body["gpuTypeIds"] == cfg.endpoint.gpu_types
     assert ep_body["dataCenterIds"] == ["EU-RO-1"]
     assert ep_body["workers"] == {"min": 0, "max": 3}
-    assert ep_body["allowedCudaVersions"] == ["12.8"]
+    assert ep_body["allowedCudaVersions"] == ["12.8", "12.9", "13.0"]  # cuda_min and newer
 
     entry = load_state(tmp_path / ".runpod" / "state.yaml")["endpoints"]["ocrbench-dotsocr"]
     assert entry["id"] == fake.endpoints[0]["id"]
