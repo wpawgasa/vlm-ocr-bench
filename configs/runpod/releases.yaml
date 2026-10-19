@@ -20,3 +20,36 @@
   endpoint_kind: load_balancing
   deployer: wpawgasa
   parity: pending
+- model: typhoon_ocr15
+  action: deploy
+  date: '2026-10-19'
+  git_sha: 9b5af83506c1c93d50a753efc308b1c6cbd559fc
+  image_digest: sha256:2ce4e4b21c628690bafea2cf22b1d02b69f2729147d215778f6a37975b300312
+  config_hash: 8c03f453296232e075657b477a6f12c3ab62e5eb4d7482a39cccdd30f54ef915
+  weights_revision: 15b381a2d62569e6736f9c085859dff68e48608d
+  vllm_version: 0.11.0
+  endpoint_kind: load_balancing
+  deployer: wpawgasa
+  parity: pending
+- model: paddleocr_vl
+  action: deploy
+  date: '2026-10-19'
+  git_sha: 9b5af83506c1c93d50a753efc308b1c6cbd559fc
+  image_digest: sha256:93b3551d286ed9ec6a3f0abd92df23d896c95d0f12d2ae6e4c99fd454fcdfb37
+  config_hash: d4070a4d7b54ba59275397cb5b4a6d757eca9cdbe4c669aa192ad5a9c04e8ef1
+  weights_revision: c5630abae1d940eafe0697512a0325494b02ab42
+  vllm_version: 0.22.1
+  endpoint_kind: load_balancing
+  deployer: wpawgasa
+  parity: pending
+- model: paddleocr_vl
+  action: deploy
+  date: '2026-10-19'
+  git_sha: fdda620af0010efdd317084bebf3f83eb0b1ea95
+  image_digest: sha256:2af91a60bf720ce440b7cf8d5c0d5de477bd652036a4f6b52238f8db58157c18
+  config_hash: d4070a4d7b54ba59275397cb5b4a6d757eca9cdbe4c669aa192ad5a9c04e8ef1
+  weights_revision: c5630abae1d940eafe0697512a0325494b02ab42
+  vllm_version: 0.22.1
+  endpoint_kind: load_balancing
+  deployer: wpawgasa
+  parity: pending
