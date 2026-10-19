@@ -221,6 +221,17 @@ def test_new_release_suspends_promotion(configs, tmp_path):
     assert entry["approved_by"] == "reviewer"
 
 
+def test_container_env_change_on_the_same_image_reapplies_the_template(configs, tmp_path):
+    fake = FakeRunpod()
+    _deploy(configs, fake, tmp_path)
+    fake.endpoints[0]["env"] = {}  # e.g. deployed before the template carried PORT
+    fake.calls.clear()
+    result = _deploy(configs, fake, tmp_path)
+    assert result.action == "updated"
+    assert fake.writes[-1][2]["templateId"]
+    assert fake.endpoints[0]["env"]["PORT"] == "8000"
+
+
 def test_existing_endpoint_is_found_by_name(configs, tmp_path):
     cfg = _cfg(configs)
     fake = FakeRunpod(

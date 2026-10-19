@@ -221,13 +221,15 @@ def _diff(
     existing: dict[str, Any], desired: dict[str, Any], template: dict[str, Any]
 ) -> dict[str, Any]:
     """The PATCH body. v2 applies `templateId` once and keeps no link, so the endpoint is on
-    this release when its image and registry match the template's."""
+    this release when its container settings (image, registry, ports, env) match the template's."""
     patch = {
         k: v
         for k, v in desired.items()
         if k not in ("name", "templateId") and not is_kind_key(k) and not _same(existing.get(k), v)
     }
-    if any(existing.get(k) != template.get(k) for k in ("image", "registry")):
+    if any(
+        not _same(existing.get(k), template.get(k)) for k in ("image", "registry", "ports", "env")
+    ):
         patch["templateId"] = desired["templateId"]
     return patch
 

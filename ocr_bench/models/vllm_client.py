@@ -95,11 +95,17 @@ async def wait_until_healthy(
     clock: Callable[[], float],
 ) -> None:
     """Poll `get` until it answers 200. 204/502/503 mean "initialising" and are retried every
-    `HEALTH_POLL_S` while the `wait_ready_s` budget lasts; anything else fails at once."""
+    `HEALTH_POLL_S` while the `wait_ready_s` budget lasts, and so does a timeout (a Runpod
+    load balancer holds the request while no worker is ready); anything else fails at once."""
     deadline = clock() + wait_ready_s
     while True:
         try:
             response = await get()
+        except httpx.TimeoutException as exc:
+            if clock() >= deadline:
+                raise EndpointUnavailable(model, base_url, f"{type(exc).__name__}: {exc}") from exc
+            await sleep(HEALTH_POLL_S)
+            continue
         except httpx.HTTPError as exc:
             raise EndpointUnavailable(model, base_url, str(exc)) from exc
         status = response.status_code

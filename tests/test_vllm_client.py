@@ -365,6 +365,31 @@ def test_health_budget_exhausted_reports_last_status():
     assert clock.now <= 15
 
 
+def test_health_waits_through_read_timeouts_while_a_worker_starts():
+    """A Runpod load balancer holds the request while no worker is ready (live, 2026-10-19)."""
+    answers = iter(["timeout", "timeout", 204, 200])
+
+    def handler(request):
+        a = next(answers)
+        if a == "timeout":
+            raise httpx.ReadTimeout("held", request=request)
+        return httpx.Response(a)
+
+    client, clock = _waiting_client(handler, wait_ready_s=600)
+    asyncio.run(client.health())
+    assert clock.sleeps == [5.0, 5.0, 5.0]
+
+
+def test_health_timeout_after_the_budget_is_unavailable():
+    def handler(request):
+        raise httpx.ReadTimeout("held", request=request)
+
+    client, clock = _waiting_client(handler, wait_ready_s=12)
+    with pytest.raises(EndpointUnavailable, match="ReadTimeout|held"):
+        asyncio.run(client.health())
+    assert clock.now <= 15
+
+
 def test_zero_budget_fails_immediately_on_204():
     client, clock = _waiting_client(lambda r: httpx.Response(204))
     with pytest.raises(EndpointUnavailable) as exc_info:

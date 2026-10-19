@@ -73,3 +73,18 @@ def test_gpu_selection_takes_the_pools_and_excludes_their_other_members(tmp_path
         {"id": "NVIDIA A40", "pool": "AMPERE_48"},
     ]
     assert gpu_selection(cfg, catalog) == GpuSelection(["AMPERE_24"], ["NVIDIA New 24GB Thing"])
+
+
+@pytest.mark.parametrize(
+    ("model", "port"), [("dotsocr", 8000), ("teleocr", 8000), ("paddleocr_vl", 8080)]
+)
+def test_template_tells_the_load_balancer_the_worker_port(model, port, tmp_path):
+    """Runpod's load balancer uses PORT from the endpoint env (default 80), not the image's."""
+    cfg = load_runpod_config(pinned_configs(tmp_path) / f"{model}.yaml")
+    body = template_body(cfg, DIGEST, CRED)
+    assert body["ports"] == [f"{port}/http"]
+    assert body["env"] == {
+        "PORT": str(port),
+        "PORT_HEALTH": str(port),
+        "HEALTH_CHECK_PATH": "/health",
+    }

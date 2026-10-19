@@ -14,7 +14,7 @@ CONFIGS = ROOT / "configs" / "runpod"
 MODELS = [
     p.stem
     for p in sorted(CONFIGS.glob("*.yaml"))
-    if p.stem != "data_centers" and not p.stem.startswith("parity")
+    if p.stem not in ("data_centers", "releases") and not p.stem.startswith("parity")
 ]
 REV = "c" * 40
 

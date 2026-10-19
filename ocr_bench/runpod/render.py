@@ -22,6 +22,16 @@ def image_repo(model: str) -> str:
     return f"{IMAGE_REPO_PREFIX}{model}"
 
 
+# The port each image stage listens on (`ENV PORT` in runpod/Dockerfile). Runpod's load
+# balancer reads PORT/PORT_HEALTH from the endpoint env (default 80), not from the image.
+_STAGE_PORTS = {"plain": 8000, "teleocr": 8000, "paddle": 8080}
+HEALTH_PATH = "/health"  # vLLM and the Paddle front: 200 ready, 204 starting
+
+
+def worker_port(variant: str) -> int:
+    return _STAGE_PORTS[variant]
+
+
 def template_name(cfg: RunpodModelConfig) -> str:
     return f"ocrbench-{cfg.model}-{config_hash(cfg)[:8]}"
 
@@ -31,11 +41,13 @@ def template_body(cfg: RunpodModelConfig, digest: str, registry: str) -> dict[st
     pulled from the private registry with the Runpod registry credential id `registry`."""
     if not _SHA256_RE.match(digest):
         raise ValueError(f"image must be pinned by a sha256 digest, not a tag: {digest!r}")
+    port = worker_port(cfg.image.variant)
     return {
         "name": template_name(cfg),
         "image": f"{image_repo(cfg.model)}@{digest}",
         "disk": cfg.endpoint.container_disk_gb,
-        "ports": ["8000/http"],
+        "ports": [f"{port}/http"],
+        "env": {"PORT": str(port), "PORT_HEALTH": str(port), "HEALTH_CHECK_PATH": HEALTH_PATH},
         "serverless": True,
         "registry": registry,
     }
