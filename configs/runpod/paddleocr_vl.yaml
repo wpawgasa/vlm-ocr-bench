@@ -27,7 +27,7 @@ endpoint:
   idle_timeout_s: 120
   scaler: {type: REQUEST_COUNT, value: 4}
   flashboot: true
-  data_centers: []
+  data_centers: ["EU-RO-1", "EU-SE-1", "EU-CZ-1", "EUR-IS-1", "EUR-IS-2", "CA-MTL-1", "US-CA-2", "US-GA-2", "US-IL-1", "US-MO-2"]
   cuda_min: "12.8"
   container_disk_gb: 30
 client:

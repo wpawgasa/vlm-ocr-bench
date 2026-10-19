@@ -3,7 +3,18 @@
     "allowedCudaVersions": [
       "12.8"
     ],
-    "dataCenterIds": [],
+    "dataCenterIds": [
+      "EU-RO-1",
+      "EU-SE-1",
+      "EU-CZ-1",
+      "EUR-IS-1",
+      "EUR-IS-2",
+      "CA-MTL-1",
+      "US-CA-2",
+      "US-GA-2",
+      "US-IL-1",
+      "US-MO-2"
+    ],
     "flashboot": true,
     "gpuTypeIds": [
       "NVIDIA L4",
@@ -26,7 +37,7 @@
   "template": {
     "disk": 30,
     "image": "code.loolootech.com/loolootech/runpod-typhoon_ocr15@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "name": "ocrbench-typhoon_ocr15-9d7fb250",
+    "name": "ocrbench-typhoon_ocr15-ebb36aa7",
     "ports": [
       "8000/http"
     ],

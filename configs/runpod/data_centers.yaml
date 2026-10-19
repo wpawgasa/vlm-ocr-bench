@@ -1,3 +1,16 @@
 # Allow-list of Runpod data centres that may serve client data (design D9). Empty = deploy
 # refuses. Fill it only from the human review in docs/runpod-data-processing-review.md.
-data_centers: []
+# 2026-10-19 (experimental-scope review): every listed Secure Cloud data centre offering a
+# configured 24 GB GPU (L4, RTX A5000, RTX 3090), Europe and North America. Re-decide at the
+# full production review (#139).
+data_centers:
+  - EU-RO-1
+  - EU-SE-1
+  - EU-CZ-1
+  - EUR-IS-1
+  - EUR-IS-2
+  - CA-MTL-1
+  - US-CA-2
+  - US-GA-2
+  - US-IL-1
+  - US-MO-2
