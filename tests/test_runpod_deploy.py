@@ -17,7 +17,7 @@ from ocr_bench.runpod.config import config_hash, load_runpod_config
 from ocr_bench.runpod.releases import load_releases
 from ocr_bench.runpod.render import image_repo, template_name
 from ocr_bench.runpod.state import load_state
-from tests.runpod_fake_api import FakeRunpod
+from tests.runpod_fake_api import BLACKWELL_MIG, FakeRunpod
 from tests.runpod_helpers import REV, pinned_configs
 
 runner = CliRunner()
@@ -122,11 +122,18 @@ def test_first_deploy_creates_template_and_endpoint(configs, tmp_path):
     ep_body = fake.writes[1][2]
     assert ep_body["name"] == "ocrbench-dotsocr"
     assert ep_body["templateId"] == fake.templates[0]["id"]
-    assert ep_body["type"] == "load_balancer"
-    assert ep_body["gpuTypeIds"] == cfg.endpoint.gpu_types
+    assert ep_body["type"] == "LOAD_BALANCER"
+    assert ep_body["gpu"] == {
+        "pools": ["AMPERE_24"],
+        "excludedTypes": [BLACKWELL_MIG],  # in the pool but not in gpu_types
+        "count": 1,
+        "minCudaVersion": "12.8",
+    }
     assert ep_body["dataCenterIds"] == ["EU-RO-1"]
-    assert ep_body["workers"] == {"min": 0, "max": 3}
-    assert ep_body["allowedCudaVersions"] == ["12.8", "12.9", "13.0"]  # cuda_min and newer
+    assert ep_body["workers"] == {"min": 0, "max": 3, "idleTimeout": 120}
+    assert ep_body["scaling"] == {"type": "REQUEST_COUNT", "requestCount": 4}
+    assert ep_body["flashboot"] == "FLASHBOOT"
+    assert fake.endpoints[0]["image"] == tmpl_body["image"]  # applied from the template
 
     entry = load_state(tmp_path / ".runpod" / "state.yaml")["endpoints"]["ocrbench-dotsocr"]
     assert entry["id"] == fake.endpoints[0]["id"]
@@ -176,7 +183,7 @@ def test_scaling_only_change_patches_endpoint_without_new_template(configs, tmp_
     assert [(m, p) for m, p, _ in fake.writes] == [
         ("PATCH", f"/v2/serverless/{fake.endpoints[0]['id']}")
     ]
-    assert fake.writes[0][2] == {"workers": {"min": 1, "max": 3}}
+    assert fake.writes[0][2] == {"workers": {"min": 1, "max": 3, "idleTimeout": 120}}
     assert len(fake.templates) == 1
     assert len(load_releases(tmp_path / "releases.yaml")) == 1
 
@@ -218,7 +225,7 @@ def test_existing_endpoint_is_found_by_name(configs, tmp_path):
     cfg = _cfg(configs)
     fake = FakeRunpod(
         templates=[{"id": "t0", "name": template_name(cfg), "image": "x@" + DIGEST2}],
-        endpoints=[{"id": "e0", "name": "ocrbench-dotsocr", "type": "load_balancer"}],
+        endpoints=[{"id": "e0", "name": "ocrbench-dotsocr", "type": "LOAD_BALANCER"}],
         list_wrapper="data",
     )
     result = _deploy(configs, fake, tmp_path)
@@ -229,7 +236,7 @@ def test_existing_endpoint_is_found_by_name(configs, tmp_path):
 
 
 def test_kind_mismatch_is_refused_and_changes_nothing(configs, tmp_path):
-    fake = FakeRunpod(endpoints=[{"id": "e0", "name": "ocrbench-dotsocr", "type": "queue"}])
+    fake = FakeRunpod(endpoints=[{"id": "e0", "name": "ocrbench-dotsocr", "type": "QUEUE"}])
     with pytest.raises(dp.DeployRefused) as err:
         _deploy(configs, fake, tmp_path)
     msg = str(err.value)
@@ -273,6 +280,28 @@ def test_created_template_uses_the_registry_credential(configs, tmp_path):
     fake = FakeRunpod()
     _deploy(configs, fake, tmp_path)
     assert fake.templates[0]["registry"] == CRED
+
+
+def test_refuses_a_gpu_type_without_a_serverless_pool(configs, tmp_path):
+    _edit(configs, gpu_types=["NVIDIA L4", "NVIDIA GeForce RTX 3080"])
+    _refused(configs, tmp_path, "RTX 3080")
+
+
+def test_refuses_a_gpu_type_missing_from_the_catalog(configs, tmp_path):
+    _edit(configs, gpu_types=["NVIDIA L4", "NVIDIA Imaginary 9000"])
+    _refused(configs, tmp_path, "Imaginary 9000")
+
+
+def test_repeat_deploy_ignores_fields_the_api_adds(configs, tmp_path):
+    fake = FakeRunpod()
+    _deploy(configs, fake, tmp_path)
+    ep = fake.endpoints[0]
+    ep["gpu"] = {**ep["gpu"], "allowedCudaVersions": []}  # the live API returns these too
+    ep["mounts"] = {"network": [], "global": []}
+    ep["timeout"] = 300000
+    fake.calls.clear()
+    assert _deploy(configs, fake, tmp_path).action == "up_to_date"
+    assert fake.writes == []
 
 
 def test_refuses_empty_data_centers(configs, tmp_path):
@@ -342,8 +371,8 @@ def test_refuses_remote_network_volume_on_promotable_config(configs, tmp_path):
             {
                 "id": "e0",
                 "name": "ocrbench-dotsocr",
-                "type": "load_balancer",
-                "networkVolumeId": "vol-console",
+                "type": "LOAD_BALANCER",
+                "mounts": {"network": [{"volumeId": "vol-console"}], "global": []},
             }
         ]
     )
@@ -364,8 +393,8 @@ def test_network_volume_allowed_on_queue_config(configs, tmp_path):
     result = _deploy(configs, fake, tmp_path)
     assert result.action == "created"
     ep_body = fake.writes[1][2]
-    assert ep_body["type"] == "queue"
-    assert ep_body["networkVolumeId"] == "vol-shared"
+    assert ep_body["type"] == "QUEUE"
+    assert ep_body["mounts"] == {"network": [{"volumeId": "vol-shared"}]}
 
 
 def test_network_volume_refused_on_promoted_queue_endpoint(configs, tmp_path):
@@ -409,7 +438,8 @@ def test_cli_dry_run_prints_bodies_without_network(configs, tmp_path, monkeypatc
     bodies = json.loads(result.output)
     assert bodies["template"]["image"].endswith(DIGEST)
     assert bodies["template"]["registry"] == CRED
-    assert bodies["endpoint"]["type"] == "load_balancer"
+    assert bodies["endpoint"]["type"] == "LOAD_BALANCER"
+    assert bodies["endpoint"]["gpu"]["pools"] == ["<from /v2/catalog/gpus at deploy>"]
     assert bodies["endpoint"]["templateId"] == "<template-id>"
     assert _no_endpoints(tmp_path / "state.yaml")
 
@@ -434,7 +464,7 @@ def test_cli_deploy_then_noop(configs, tmp_path, monkeypatch):
 
 
 def test_cli_refusal_exits_2(configs, tmp_path, monkeypatch):
-    fake = FakeRunpod(endpoints=[{"id": "e0", "name": "ocrbench-dotsocr", "type": "queue"}])
+    fake = FakeRunpod(endpoints=[{"id": "e0", "name": "ocrbench-dotsocr", "type": "QUEUE"}])
     monkeypatch.setattr(runpod_cli, "make_api", lambda: _api(fake))
     result = _cli(configs, tmp_path, "--digest", DIGEST)
     assert result.exit_code == 2

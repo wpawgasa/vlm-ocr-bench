@@ -140,9 +140,11 @@ def rollback(
 
 
 def _worker_counts(endpoint: dict[str, Any]) -> dict[str, Any] | None:
-    if isinstance(endpoint.get("workers"), dict):
-        return endpoint["workers"]
-    counts = {"min": endpoint.get("workersMin"), "max": endpoint.get("workersMax")}
+    workers = endpoint.get("workers")
+    if isinstance(workers, dict):  # v2 also carries idleTimeout here; report the counts only
+        counts = {"min": workers.get("min"), "max": workers.get("max")}
+    else:
+        counts = {"min": endpoint.get("workersMin"), "max": endpoint.get("workersMax")}
     return counts if any(v is not None for v in counts.values()) else None
 
 

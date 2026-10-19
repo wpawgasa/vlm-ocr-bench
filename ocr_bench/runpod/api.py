@@ -70,6 +70,10 @@ class RunpodAPI:
     def create_template(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._call("POST", "/templates", body)
 
+    def gpu_catalog(self) -> list[dict[str, Any]]:
+        """GPU types with their serverless `pool` (null when not offered on serverless)."""
+        return _items(self._call("GET", "/catalog/gpus"))
+
     def list_endpoints(self) -> list[dict[str, Any]]:
         return _items(self._call("GET", "/serverless"))
 

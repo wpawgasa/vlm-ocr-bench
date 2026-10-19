@@ -1,10 +1,5 @@
 {
   "endpoint": {
-    "allowedCudaVersions": [
-      "12.8",
-      "12.9",
-      "13.0"
-    ],
     "dataCenterIds": [
       "EU-RO-1",
       "EU-SE-1",
@@ -17,21 +12,26 @@
       "US-IL-1",
       "US-MO-2"
     ],
-    "flashboot": true,
-    "gpuTypeIds": [
-      "NVIDIA L4",
-      "NVIDIA RTX A5000",
-      "NVIDIA GeForce RTX 3090"
-    ],
-    "idleTimeout": 120,
+    "flashboot": "FLASHBOOT",
+    "gpu": {
+      "count": 1,
+      "excludedTypes": [
+        "MIG"
+      ],
+      "minCudaVersion": "12.8",
+      "pools": [
+        "AMPERE_24"
+      ]
+    },
     "name": "ocrbench-teleocr",
     "scaling": {
-      "type": "REQUEST_COUNT",
-      "value": 4
+      "requestCount": 4,
+      "type": "REQUEST_COUNT"
     },
     "templateId": "tmpl-id",
-    "type": "load_balancer",
+    "type": "LOAD_BALANCER",
     "workers": {
+      "idleTimeout": 120,
       "max": 3,
       "min": 0
     }

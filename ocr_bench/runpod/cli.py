@@ -29,7 +29,7 @@ from ocr_bench.runpod.deploy import (
 )
 from ocr_bench.runpod.deploy import deploy as run_deploy
 from ocr_bench.runpod.releases import ReleaseRecordError
-from ocr_bench.runpod.render import endpoint_body, image_repo, template_body
+from ocr_bench.runpod.render import PLACEHOLDER_GPU, endpoint_body, image_repo, template_body
 from ocr_bench.runpod.smoke import SmokeReport, run_smoke
 
 runpod_app = typer.Typer(no_args_is_help=True, help="Build and deploy Runpod serving endpoints.")
@@ -100,7 +100,7 @@ def render(
     try:
         bodies = {
             "template": template_body(cfg, digest, "<registry-credential-id>"),
-            "endpoint": endpoint_body(cfg, "<template-id>", profile),  # type: ignore[arg-type]
+            "endpoint": endpoint_body(cfg, "<template-id>", profile, PLACEHOLDER_GPU),  # type: ignore[arg-type]
         }
     except ValueError as e:
         typer.echo(f"error: {e}", err=True)
