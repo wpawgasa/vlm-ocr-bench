@@ -45,7 +45,7 @@ See proposal.md for motivation. The facts that shape this design:
 ## Decisions
 
 ### D1. Load-balancing endpoints that expose vLLM's own API
-Each model is a Runpod **load-balancing** endpoint whose worker is our vLLM-based image listening on `PORT=8000`, health path `/health` (vLLM's own; `HEALTH_CHECK_PATH=/health`). The client base URL is `https://<endpoint-id>.api.runpod.ai/v1`.
+Each model is a Runpod **load-balancing** endpoint whose worker is our vLLM-based image listening on `PORT=8000`, health path `/ping`, the path the load balancer actually polls. vLLM serves it, and so does the Paddle front. *Corrected 2026-10-19:* a live Paddle worker's logs showed the balancer polling `/ping` despite `HEALTH_CHECK_PATH=/health`, so the template sets only `PORT` and `PORT_HEALTH`. The client base URL is `https://<endpoint-id>.api.runpod.ai/v1`.
 
 Why, over the queue-based `worker-vllm` with its `/openai/v1` route:
 - **No stored payloads.** The queue keeps job inputs and results (30 min for `/run`, 1 min for `/runsync`, TTL up to 24 h) and shows them in the console. A load-balancing endpoint proxies the HTTP request and stores nothing, which is the single biggest client-data property we can buy from the platform (D9).
