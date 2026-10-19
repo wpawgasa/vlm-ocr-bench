@@ -14,7 +14,7 @@ from pathlib import Path
 
 from ocr_bench.runpod.config import load_runpod_config
 
-_NOT_MODELS = {"data_centers", "parity_samples.v1"}
+_NOT_MODELS = {"data_centers", "parity_samples.v1", "releases"}  # releases: the deploy log
 
 
 def _all_models(configs_dir: Path) -> list[str]:

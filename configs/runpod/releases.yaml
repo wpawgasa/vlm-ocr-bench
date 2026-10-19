@@ -9,3 +9,14 @@
   endpoint_kind: load_balancing
   deployer: wpawgasa
   parity: pending
+- model: dotsocr
+  action: deploy
+  date: '2026-10-19'
+  git_sha: 45965775cf626994e0ee61fbc8ed38f28e764ae0
+  image_digest: sha256:295b10b81b090bda7e12d224f063dffac82c2a891b49207416fd8cab6f3b7378
+  config_hash: a97693dafef15e1fca75809ddc55bf590a1d9f806c6884c990d633393fd8cd51
+  weights_revision: c0111ce6bc07803dbc267932ffef0ae3a51dc951
+  vllm_version: 0.11.0
+  endpoint_kind: load_balancing
+  deployer: wpawgasa
+  parity: pending
