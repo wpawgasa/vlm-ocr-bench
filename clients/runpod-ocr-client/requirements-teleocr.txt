@@ -1,0 +1,4 @@
+# Extra packages only for --model teleocr, where layout blocks can be polygons.
+-r requirements.txt
+numpy==2.4.6
+opencv-python-headless==5.0.0.93

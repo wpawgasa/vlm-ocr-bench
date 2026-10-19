@@ -32,7 +32,7 @@ dots.ocr pin matches the benchmarked snapshot.
 
 ## Client sample: document to Markdown (any model)
 
-`scripts/runpod_parse_document.py` is a standalone client. It imports nothing from this repo
+`clients/runpod-ocr-client/runpod_parse_document.py` is a standalone client. It imports nothing from this repo
 and needs `httpx`, `pillow` and `pypdfium2`, plus `opencv-python-headless` and `numpy` for
 TeleOCR polygon blocks. It sends a PDF or images to any of the five endpoints and writes
 Markdown:
@@ -40,7 +40,7 @@ Markdown:
 ```bash
 export TYPHOON_BASE_URL=https://<endpoint-id>.api.runpod.ai/v1
 export TYPHOON_API_KEY=<the restricted client key: Serverless Read/Write, no management access>   # falls back to $RUNPOD_API_KEY
-python scripts/runpod_parse_document.py --model typhoon_ocr15 statement.pdf -o statement.md
+python clients/runpod-ocr-client/runpod_parse_document.py --model typhoon_ocr15 statement.pdf -o statement.md
 ```
 
 Each model is called, and answers, differently. The script calls each the way the

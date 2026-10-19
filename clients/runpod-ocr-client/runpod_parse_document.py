@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Parse a document (PDF or images) to Markdown with any of the Runpod OCR endpoints.
 
-A standalone client sample: it imports nothing from this repo, so it can be copied into
-another project. Requirements: `pip install httpx pillow pypdfium2` (plus
-`opencv-python-headless numpy` for TeleOCR pages with polygon layout blocks).
+A standalone client: it needs only the packages in requirements.txt (see README.md), so this
+folder can be handed to another team as is. Python 3.10 or newer.
 
+    pip install -r requirements.txt
     export DOTSOCR_BASE_URL=https://<endpoint-id>.api.runpod.ai/v1
-    export DOTSOCR_API_KEY=<the restricted client key: Serverless Read/Write, no management access>
-    python scripts/runpod_parse_document.py --model dotsocr statement.pdf -o statement.md
-    python scripts/runpod_parse_document.py --model typhoon_ocr15 page1.png page2.jpg
+    export DOTSOCR_API_KEY=<the Runpod client key>
+    python runpod_parse_document.py --model dotsocr statement.pdf -o statement.md
+    python runpod_parse_document.py --model typhoon_ocr15 page1.png page2.jpg
 
 Each model is called and answers differently; the script hides that and always writes
 Markdown, one `<!-- page N -->` section per page:
@@ -904,7 +904,14 @@ async def parse_document(
     return "\n\n".join(sections) + "\n"
 
 
+def _fail(message: str, code: int) -> int:
+    print(f"error: {message}", file=sys.stderr)
+    return code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    """Exit codes: 0 done, 2 bad input or configuration, 3 no worker became ready,
+    4 the endpoint answered with an HTTP error."""
     ap = argparse.ArgumentParser(
         description="Parse a PDF or images to Markdown with a Runpod OCR endpoint."
     )
@@ -935,17 +942,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"set --base-url/--api-key or ${spec.base_url_env} and "
             f"${spec.api_key_env} (or $RUNPOD_API_KEY)"
         )
-    markdown = asyncio.run(
-        parse_document(
-            args.model,
-            args.inputs,
-            base_url,
-            api_key,
-            concurrency=args.concurrency,
-            wait_s=args.wait_s,
-            keep_furniture=not args.drop_page_furniture,
+    try:
+        markdown = asyncio.run(
+            parse_document(
+                args.model,
+                args.inputs,
+                base_url,
+                api_key,
+                concurrency=args.concurrency,
+                wait_s=args.wait_s,
+                keep_furniture=not args.drop_page_furniture,
+            )
         )
-    )
+    except EndpointNotReady as e:
+        return _fail(f"{e}; the endpoint may be scaled to zero or out of GPUs, retry later", 3)
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        hint = " (check the API key)" if status in (401, 403) else ""
+        return _fail(f"{e.request.method} {e.request.url.path} -> HTTP {status}{hint}", 4)
+    except httpx.HTTPError as e:
+        return _fail(f"{type(e).__name__}: {e}", 4)
+    except (ValueError, OSError) as e:
+        return _fail(str(e), 2)
     if args.output:
         args.output.write_text(markdown, encoding="utf-8")
     else:
