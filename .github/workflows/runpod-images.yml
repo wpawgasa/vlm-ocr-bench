@@ -1,0 +1,89 @@
+name: Runpod images
+
+# Builds the weights-baked worker image per model (design D2) and pushes it to the private
+# code.loolootech.com registry (open question 3); Runpod pulls with its registry credential. Templates reference the pushed digest (printed in the job summary), never a tag.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "runpod/**"
+      - "configs/runpod/**"
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model name (configs/runpod/<model>.yaml)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY_PREFIX: code.loolootech.com/loolootech/runpod-
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+      - name: Select models
+        id: plan
+        env:
+          INPUT_MODEL: ${{ inputs.model }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$INPUT_MODEL" ]; then
+            matrix=$(uv run --frozen python -m ocr_bench.runpod.build_plan --model "$INPUT_MODEL")
+          else
+            mapfile -t changed < <(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+            matrix=$(uv run --frozen python -m ocr_bench.runpod.build_plan --changed "${changed[@]}")
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: code.loolootech.com
+          username: ${{ secrets.LOOLOO_REGISTRY_USER }}
+          password: ${{ secrets.LOOLOO_REGISTRY_TOKEN }}
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: runpod/Dockerfile
+          target: ${{ matrix.variant }}
+          push: true
+          tags: ${{ env.REGISTRY_PREFIX }}${{ matrix.model }}:${{ github.sha }}
+          build-args: |
+            VLLM_IMAGE=${{ matrix.base }}
+            MODEL=${{ matrix.model }}
+            WEIGHTS_REPO=${{ matrix.repo }}
+            WEIGHTS_REVISION=${{ matrix.revision }}
+          secrets: |
+            HF_TOKEN=${{ secrets.HF_TOKEN }}
+      - name: Digest to job summary
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          MODEL: ${{ matrix.model }}
+        run: |
+          {
+            echo "### runpod-${MODEL}"
+            echo
+            echo "\`${REGISTRY_PREFIX}${MODEL}@${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
