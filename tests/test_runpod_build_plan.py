@@ -23,12 +23,22 @@ def test_runpod_code_change_affects_every_model():
     assert {"dotsocr", "teleocr", "paddleocr_vl"} <= set(models)
 
 
+def test_every_planned_model_has_a_loadable_config(tmp_path):
+    shutil.copytree(CONFIGS.parent / "models", tmp_path / "models")
+    configs = shutil.copytree(CONFIGS, tmp_path / "runpod")
+    (configs / "releases.yaml").write_text("- {model: dotsocr, action: deploy}\n")
+    models = affected_models(["runpod/Dockerfile"], configs)
+    assert "releases" not in models
+    assert len(build_matrix(models, configs)) == len(models)
+
+
 def test_single_config_change_affects_only_that_model():
     assert affected_models(["configs/runpod/dotsocr.yaml"], CONFIGS) == ["dotsocr"]
 
 
 def test_non_model_configs_are_ignored():
     assert affected_models(["configs/runpod/data_centers.yaml"], CONFIGS) == []
+    assert affected_models(["configs/runpod/releases.yaml"], CONFIGS) == []  # deploy's log
     assert affected_models(["README.md"], CONFIGS) == []
 
 
