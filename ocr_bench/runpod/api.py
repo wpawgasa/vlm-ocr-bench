@@ -23,7 +23,7 @@ def _items(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return payload
     if isinstance(payload, dict):
-        for key in ("data", "items", "endpoints", "templates"):
+        for key in ("data", "items", "endpoints", "templates", "gpus"):
             if isinstance(payload.get(key), list):
                 return payload[key]
     raise RunpodAPIError(f"unexpected list response shape: {type(payload).__name__}")

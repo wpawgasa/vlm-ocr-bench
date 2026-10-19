@@ -57,7 +57,7 @@ class FakeRunpod:
         if path == "/v2/serverless" and request.method == "GET":
             return self._list(self.endpoints)
         if path == "/v2/catalog/gpus" and request.method == "GET":
-            return self._list(self.catalog)
+            return httpx.Response(200, json={"gpus": self.catalog})  # the live wrapper
         if path == "/v2/serverless" and request.method == "POST":
             ep = {"id": f"ep{next(self._ids)}", **self._apply_template(body)}
             self.endpoints.append(ep)
