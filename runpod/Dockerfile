@@ -63,9 +63,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # paddlepaddle-gpu 3.x is published only on Paddle's index (PyPI stops at 2.6.x); CUDA 12.6
 # wheels, as the devcontainer's GPU layout path uses; the wheel brings its own CUDA libraries.
+# Those nvidia-* wheels (an older NCCL) would replace the ones vLLM's torch links against, so
+# Paddle lives in its own venv, as it has its own image in the devcontainer; the supervisor
+# starts the pipeline servers with $PADDLE_PYTHON.
 ARG PADDLE_PKG=paddlepaddle-gpu
 ARG PADDLE_INDEX=https://www.paddlepaddle.org.cn/packages/stable/cu126/
-RUN pip install --no-cache-dir "${PADDLE_PKG}==3.3.1" -i "${PADDLE_INDEX}" \
+RUN pip install --no-cache-dir uv==0.8.9 && uv venv --seed /opt/paddle && . /opt/paddle/bin/activate \
+    && pip install --no-cache-dir "${PADDLE_PKG}==3.3.1" -i "${PADDLE_INDEX}" \
         --extra-index-url https://pypi.org/simple \
     && pip install --no-cache-dir "paddleocr[doc-parser]==3.7.0" \
     && paddlex --install serving -y \
@@ -77,6 +81,7 @@ COPY runpod/paddle_front.py /app/paddle_front.py
 COPY runpod/paddle_supervisor.py /app/paddle_supervisor.py
 
 ENV PORT=8080 \
-    PADDLE_PIPELINES=2
+    PADDLE_PIPELINES=2 \
+    PADDLE_PYTHON=/opt/paddle/bin/python
 EXPOSE 8080
 ENTRYPOINT ["python3", "/app/paddle_supervisor.py"]
