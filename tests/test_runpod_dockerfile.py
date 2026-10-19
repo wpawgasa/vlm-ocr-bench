@@ -140,3 +140,14 @@ def test_plain_build_with_fake_vllm_prints_rendered_argv():
     )  # fmt: skip
     out = subprocess.run(["docker", "run", "--rm", img], check=True, capture_output=True, text=True)
     assert "--max-log-len 0" in out.stdout
+
+
+@pytest.mark.parametrize("variant", ["plain", "teleocr", "paddle"])
+def test_stage_port_matches_the_template_port(variant):
+    from ocr_bench.runpod.render import worker_port
+
+    stage = _stages()[variant]
+    if variant == "teleocr":  # inherits the plain stage's ENV
+        stage = _stages()["plain"] + stage
+    ports = re.findall(r"PORT=(\d+)", stage)
+    assert ports and int(ports[-1]) == worker_port(variant)

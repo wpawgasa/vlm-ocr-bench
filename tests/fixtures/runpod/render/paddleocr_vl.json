@@ -38,10 +38,15 @@
   },
   "template": {
     "disk": 30,
+    "env": {
+      "HEALTH_CHECK_PATH": "/health",
+      "PORT": "8080",
+      "PORT_HEALTH": "8080"
+    },
     "image": "code.loolootech.com/loolootech/runpod-paddleocr_vl@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "name": "ocrbench-paddleocr_vl-e3bdaa96",
     "ports": [
-      "8000/http"
+      "8080/http"
     ],
     "registry": "cred-test-id",
     "serverless": true

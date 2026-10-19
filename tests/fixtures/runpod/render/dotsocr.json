@@ -38,6 +38,11 @@
   },
   "template": {
     "disk": 30,
+    "env": {
+      "HEALTH_CHECK_PATH": "/health",
+      "PORT": "8000",
+      "PORT_HEALTH": "8000"
+    },
     "image": "code.loolootech.com/loolootech/runpod-dotsocr@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "name": "ocrbench-dotsocr-2f54a41d",
     "ports": [
