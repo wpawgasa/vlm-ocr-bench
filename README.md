@@ -31,6 +31,7 @@ see `.env.example`); the CLI loads it at startup and never overrides a variable 
 
 ```bash
 uv sync --all-extras   # install runtime + dev (pytest, ruff) deps into /home/vscode/.venv
+uvx pre-commit install # once per clone: gitleaks blocks commits with secrets (.gitleaks.toml)
 uv run pytest          # runs tests/ (live-server tests are skipped by default)
 uv run ocrbench --help # lists the prepare/infer/probe/score/calibrate/bench-latency/report stages
 ocrbench prepare --config configs/run.yaml --run-id <id> [--datasets thaiocrbench]
