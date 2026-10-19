@@ -64,14 +64,20 @@ def build_commands(
     vllm += ["--host", VLLM_HOST, "--port", str(VLLM_PORT)]
     cmds: list[Command] = [("vllm", vllm, base)]
 
+    # Paddle's venv (its CUDA wheels must not touch vLLM's); `paddlex` must come from it too.
+    paddle_python = env.get("PADDLE_PYTHON") or sys.executable
+    paddle_path = os.pathsep.join(
+        p for p in (os.path.dirname(paddle_python), env.get("PATH", "")) if p
+    )
     for i in range(n):
         port = PIPELINE_BASE_PORT + i
         cmds.append(
             (
                 f"pipeline{i}",
-                [sys.executable, str(pipeline_script)],
+                [paddle_python, str(pipeline_script)],
                 {
                     **base,
+                    "PATH": paddle_path,
                     "PORT": str(port),
                     "VL_SERVER_URL": f"http://{VLLM_HOST}:{VLLM_PORT}/v1",
                     "PIPELINE_DEVICE": "gpu:0",

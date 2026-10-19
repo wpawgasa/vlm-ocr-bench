@@ -61,6 +61,18 @@ def test_default_two_pipelines_on_8081_up(baked):
         assert env["PIPELINE_DEVICE"] == "gpu:0"
 
 
+def test_pipelines_run_in_the_paddle_venv(baked):
+    """Paddle's own CUDA wheels live in a separate venv so they cannot replace vLLM's NCCL."""
+    cmds = _cmds(baked, PADDLE_PYTHON="/opt/paddle/bin/python", PATH="/usr/bin")
+    pipes = [c for c in cmds if c[0].startswith("pipeline")]
+    for _, argv, env in pipes:
+        assert argv[0] == "/opt/paddle/bin/python"
+        assert env["PATH"] == "/opt/paddle/bin:/usr/bin"  # entrypoint execs that `paddlex`
+    others = [c for c in cmds if not c[0].startswith("pipeline")]
+    for _, _, env in others:
+        assert env.get("PATH") == "/usr/bin"
+
+
 def test_paddle_pipelines_env_sets_count(baked):
     pipes = [c for c in _cmds(baked, PADDLE_PIPELINES="3") if c[0].startswith("pipeline")]
     assert [env["PORT"] for _, _, env in pipes] == ["8081", "8082", "8083"]

@@ -85,16 +85,26 @@ def test_paddle_installs_gpu_paddlex():
 
 
 def test_paddle_install_matches_devcontainer_pipeline_image():
-    """Same RUN as .devcontainer/paddle-pipeline.Dockerfile, only the wheel default differs."""
+    """Same install as .devcontainer/paddle-pipeline.Dockerfile (run inside the Paddle venv);
+    only the wheel default differs."""
     dev = (ROOT / ".devcontainer" / "paddle-pipeline.Dockerfile").read_text().replace("\\\n", " ")
     dev_run = next(ln for ln in dev.splitlines() if "paddleocr[doc-parser]" in ln)
-    stage = _stages()["paddle"]
+    stage = _stages()["paddle"].replace("\\\n", " ")
     paddle_run = next(ln for ln in stage.splitlines() if "paddleocr[doc-parser]" in ln)
 
-    def norm(s: str) -> str:
-        return " ".join(s.split()).replace("python3 ", "python ")
+    def install(s: str) -> str:
+        s = " ".join(s.split()).replace("python3 ", "python ")
+        return s[s.index('pip install --no-cache-dir "${PADDLE_PKG}') :]
 
-    assert norm(paddle_run) == norm(dev_run)
+    assert install(paddle_run) == install(dev_run)
+
+
+def test_paddle_installs_into_its_own_venv():
+    """paddlepaddle-gpu's nvidia-* wheels would replace the NCCL vLLM's torch needs."""
+    stage = _stages()["paddle"]
+    assert "uv venv --seed /opt/paddle" in stage
+    assert ". /opt/paddle/bin/activate" in stage
+    assert "PADDLE_PYTHON=/opt/paddle/bin/python" in stage
 
 
 def test_paddle_runs_supervisor_and_front_on_8080():
