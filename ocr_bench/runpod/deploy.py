@@ -28,9 +28,11 @@ from ocr_bench.runpod.config import (
     render_vllm_argv,
 )
 from ocr_bench.runpod.render import (
+    PLACEHOLDER_GPU,
     Profile,
     endpoint_body,
     endpoint_kind,
+    gpu_selection,
     image_repo,
     is_kind_key,
     template_body,
@@ -159,7 +161,7 @@ def dry_run_bodies(
     bare = check_config(cfg, digest, allowed_data_centers, entry)
     return {
         "template": template_body(cfg, bare, registry_credential(state)),
-        "endpoint": endpoint_body(cfg, "<template-id>", profile),
+        "endpoint": endpoint_body(cfg, "<template-id>", profile, PLACEHOLDER_GPU),
     }
 
 
@@ -173,11 +175,16 @@ def _check_existing(cfg: RunpodModelConfig, existing: dict[str, Any], entry: dic
             f"endpoint {name} is {kind} but the config says {cfg.endpoint.kind}; "
             "refusing to change it"
         )
-    volume = existing.get("networkVolumeId")
-    if volume and volume != cfg.endpoint.network_volume and _promotable(cfg, entry):
-        raise DeployRefused(
-            f"endpoint {name} has network volume {volume!r}, not allowed on a promotable endpoint"
-        )
+    mounts = existing.get("mounts") or {}
+    volumes = [m.get("volumeId") for m in mounts.get("network") or []] + list(
+        existing.get("networkVolumes") or []
+    )
+    for volume in volumes:
+        if volume and volume != cfg.endpoint.network_volume and _promotable(cfg, entry):
+            raise DeployRefused(
+                f"endpoint {name} has network volume {volume!r}, "
+                "not allowed on a promotable endpoint"
+            )
 
 
 def _find_or_create_template(
@@ -196,12 +203,33 @@ def _find_or_create_template(
     return api.create_template(body), True
 
 
-def _diff(existing: dict[str, Any], desired: dict[str, Any]) -> dict[str, Any]:
-    return {
+def _same(have: Any, want: Any) -> bool:
+    """`want` is already in place: nested objects compare as subsets (the API adds fields),
+    an empty list equals an absent one, and string lists ignore order."""
+    if isinstance(want, dict):
+        have = have if isinstance(have, dict) else {}
+        return all(_same(have.get(k), v) for k, v in want.items())
+    if want in (None, []) and have in (None, []):
+        return True
+    if isinstance(want, list) and isinstance(have, list):
+        if all(isinstance(x, str) for x in [*want, *have]):
+            return sorted(want) == sorted(have)
+    return have == want
+
+
+def _diff(
+    existing: dict[str, Any], desired: dict[str, Any], template: dict[str, Any]
+) -> dict[str, Any]:
+    """The PATCH body. v2 applies `templateId` once and keeps no link, so the endpoint is on
+    this release when its image and registry match the template's."""
+    patch = {
         k: v
         for k, v in desired.items()
-        if k != "name" and not is_kind_key(k) and existing.get(k) != v
+        if k not in ("name", "templateId") and not is_kind_key(k) and not _same(existing.get(k), v)
     }
+    if any(existing.get(k) != template.get(k) for k in ("image", "registry")):
+        patch["templateId"] = desired["templateId"]
+    return patch
 
 
 def deploy(
@@ -248,15 +276,19 @@ def deploy(
     existing = matches[0] if matches else None
     if existing is not None:
         _check_existing(cfg, existing, entry)
+    try:
+        gpu = gpu_selection(cfg, api.gpu_catalog())
+    except ValueError as e:
+        raise DeployRefused(str(e)) from e
 
     template, _ = _find_or_create_template(api, cfg, template_body(cfg, bare, registry), bare)
-    desired = endpoint_body(cfg, template["id"], profile)
+    desired = endpoint_body(cfg, template["id"], profile, gpu)
     changed: list[str] = []
     if existing is None:
         endpoint = api.create_endpoint(desired)
         action: Action = "created"
     else:
-        patch = _diff(existing, desired)
+        patch = _diff(existing, desired, template)
         changed = sorted(patch)
         if patch:
             api.patch_endpoint(existing["id"], patch)

@@ -30,10 +30,7 @@ _RESERVED_ARGS = (
 _DIGEST_RE = re.compile(r"^[\w./-]+@sha256:[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)(?:\.\d+)?$")
-# The `allowedCudaVersions` values the Runpod endpoint API accepts, oldest first.
-RUNPOD_CUDA_VERSIONS = (
-    "11.8", "12.0", "12.1", "12.2", "12.3", "12.4", "12.5", "12.6", "12.7", "12.8", "12.9", "13.0",
-)  # fmt: skip
+_CUDA_RE = re.compile(r"^\d+\.\d+$")
 
 
 class _Strict(BaseModel):
@@ -73,8 +70,8 @@ class WeightsConfig(_Strict):
 
 
 class ScalerConfig(_Strict):
-    type: str
-    value: int
+    type: Literal["REQUEST_COUNT", "QUEUE_DELAY"]  # load-balancing endpoints need REQUEST_COUNT
+    value: int = Field(ge=1)
 
 
 class EndpointConfig(_Strict):
@@ -92,15 +89,10 @@ class EndpointConfig(_Strict):
 
     @field_validator("cuda_min")
     @classmethod
-    def _cuda_min_known(cls, v: str) -> str:
-        if v not in RUNPOD_CUDA_VERSIONS:
-            known = ", ".join(RUNPOD_CUDA_VERSIONS)
-            raise ValueError(f"cuda_min must be one of {known}, got {v!r}")
+    def _cuda_min_shape(cls, v: str) -> str:
+        if not _CUDA_RE.match(v):
+            raise ValueError(f"cuda_min must be a major.minor CUDA version like 12.8, got {v!r}")
         return v
-
-    def allowed_cuda_versions(self) -> list[str]:
-        """`cuda_min` and every newer CUDA version Runpod knows."""
-        return list(RUNPOD_CUDA_VERSIONS[RUNPOD_CUDA_VERSIONS.index(self.cuda_min) :])
 
 
 class ClientConfig(_Strict):

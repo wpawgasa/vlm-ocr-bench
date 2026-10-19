@@ -5,11 +5,12 @@ from pathlib import Path
 import pytest
 
 from ocr_bench.runpod.config import config_hash, load_runpod_config
-from ocr_bench.runpod.render import endpoint_body, template_body
+from ocr_bench.runpod.render import GpuSelection, endpoint_body, gpu_selection, template_body
 from tests.runpod_helpers import MODELS, pinned_configs
 
 DIGEST = "sha256:" + "c" * 64
 CRED = "cred-test-id"
+SEL = GpuSelection(["AMPERE_24"], [])
 SNAPSHOTS = Path(__file__).parent / "fixtures" / "runpod" / "render"
 
 
@@ -18,7 +19,7 @@ def test_rendered_bodies_match_snapshot(model, tmp_path):
     cfg = load_runpod_config(pinned_configs(tmp_path) / f"{model}.yaml")
     rendered = {
         "template": template_body(cfg, DIGEST, CRED),
-        "endpoint": endpoint_body(cfg, "tmpl-id", None),
+        "endpoint": endpoint_body(cfg, "tmpl-id", None, GpuSelection(["AMPERE_24"], ["MIG"])),
     }
     snap = SNAPSHOTS / f"{model}.json"
     if os.environ.get("UPDATE_SNAPSHOTS"):
@@ -36,9 +37,9 @@ def test_template_name_carries_config_hash_and_image_is_digest_pinned(tmp_path):
 
 def test_profiles_set_min_workers(tmp_path):
     cfg = load_runpod_config(pinned_configs(tmp_path) / "dotsocr.yaml")
-    assert endpoint_body(cfg, "t", "office")["workers"]["min"] == 1
-    assert endpoint_body(cfg, "t", "off")["workers"]["min"] == 0
-    assert endpoint_body(cfg, "t", None)["workers"]["min"] == cfg.endpoint.workers_min
+    assert endpoint_body(cfg, "t", "office", SEL)["workers"]["min"] == 1
+    assert endpoint_body(cfg, "t", "off", SEL)["workers"]["min"] == 0
+    assert endpoint_body(cfg, "t", None, SEL)["workers"]["min"] == cfg.endpoint.workers_min
 
 
 def test_template_rejects_a_tag(tmp_path):
@@ -54,7 +55,21 @@ def test_template_pulls_from_the_private_registry_with_the_credential(tmp_path):
     assert body["registry"] == CRED
 
 
-def test_cuda_min_allows_that_version_and_every_newer_one(tmp_path):
+def test_cuda_min_is_the_minimum_cuda_version(tmp_path):
     cfg = load_runpod_config(pinned_configs(tmp_path) / "dotsocr.yaml")
     assert cfg.endpoint.cuda_min == "12.8"
-    assert endpoint_body(cfg, "t", None)["allowedCudaVersions"] == ["12.8", "12.9", "13.0"]
+    gpu = endpoint_body(cfg, "t", None, GpuSelection(["AMPERE_24"], []))["gpu"]
+    assert gpu["minCudaVersion"] == "12.8"
+    assert "allowedCudaVersions" not in gpu  # the API rejects both together
+
+
+def test_gpu_selection_takes_the_pools_and_excludes_their_other_members(tmp_path):
+    cfg = load_runpod_config(pinned_configs(tmp_path) / "dotsocr.yaml")
+    catalog = [
+        {"id": "NVIDIA L4", "pool": "AMPERE_24"},
+        {"id": "NVIDIA RTX A5000", "pool": "AMPERE_24"},
+        {"id": "NVIDIA GeForce RTX 3090", "pool": "AMPERE_24"},
+        {"id": "NVIDIA New 24GB Thing", "pool": "AMPERE_24"},
+        {"id": "NVIDIA A40", "pool": "AMPERE_48"},
+    ]
+    assert gpu_selection(cfg, catalog) == GpuSelection(["AMPERE_24"], ["NVIDIA New 24GB Thing"])
