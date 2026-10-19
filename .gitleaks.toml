@@ -1,0 +1,28 @@
+# Secret scan (design D9 "Keys", task 5.5): gitleaks' default rules plus the Runpod key and
+# endpoint host. Run by the pre-commit hook (.pre-commit-config.yaml) and the CI secret-scan job.
+title = "vlm-ocr-bench"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "runpod-api-key"
+description = "Runpod API key (management or restricted endpoint key)"
+regex = '''rpa_[A-Za-z0-9]{20,}'''
+keywords = ["rpa_"]
+
+[[rules]]
+id = "runpod-endpoint-host"
+description = "Runpod serverless endpoint host; its first label is the endpoint id"
+regex = '''[a-z0-9]{10,}\.api\.runpod\.ai'''
+keywords = [".api.runpod.ai"]
+
+[[rules.allowlists]]
+description = "The fake endpoint host the tests use"
+regexes = ['''^abcdefghij12\.api\.runpod\.ai$''']
+
+# Known false positives of the default generic-api-key rule (exact values, not paths).
+[[allowlists]]
+description = "Test sentinel string and max_tokens settings"
+regexTarget = "line"
+regexes = ['''ACCT-0000-SECRET-BODY-MARKER''', '''max_tokens=\d+''']
