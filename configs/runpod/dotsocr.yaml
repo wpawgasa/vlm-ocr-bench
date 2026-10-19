@@ -1,6 +1,6 @@
 # Runpod serving facts for dots.ocr (design D2). vllm_args mirror the compose service
 # `dotsocr` minus --model, --served-model-name and --gpu-memory-utilization (tests check this).
-# weights.revision stays REQUIRED (fails validation) until task 5.4 pins the commit.
+# weights.revision is the Hugging Face commit pinned by task 5.4 (2026-10-19).
 model: dotsocr
 image:
   base: vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c
@@ -8,7 +8,7 @@ image:
   variant: plain
 weights:
   repo: dots-studio/dots.ocr
-  revision: REQUIRED
+  revision: c0111ce6bc07803dbc267932ffef0ae3a51dc951
 vllm_args:
   trust-remote-code: true
   dtype: bfloat16

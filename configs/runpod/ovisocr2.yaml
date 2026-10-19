@@ -7,7 +7,7 @@ image:
   variant: plain
 weights:
   repo: ATH-MaaS/OvisOCR2
-  revision: REQUIRED
+  revision: 1fc9221b7823a371d6e97f92d527cc847e24e107
 vllm_args:
   gdn-prefill-backend: triton
   dtype: bfloat16

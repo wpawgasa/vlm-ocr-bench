@@ -1,6 +1,6 @@
 # Runpod serving facts for TeleOCR (design D2); compose service `teleocr`. The `teleocr` image
 # variant adds the plugin and no-repeat-ngram logits processor (same pinned commit as
-# .devcontainer/teleocr-vllm.Dockerfile). weights.revision stays REQUIRED until task 5.4.
+# .devcontainer/teleocr-vllm.Dockerfile). weights.revision pinned by task 5.4.
 model: teleocr
 image:
   base: vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c
@@ -8,7 +8,7 @@ image:
   variant: teleocr
 weights:
   repo: StarDoc-AI/TeleOCR
-  revision: REQUIRED
+  revision: 70a19ec6a3b036311af19ae5e762e650f41a5980
 vllm_args:
   logits-processors: teleocr_no_repeat_ngram:VllmV1NoRepeatNGramLogitsProcessor
   trust-remote-code: true
