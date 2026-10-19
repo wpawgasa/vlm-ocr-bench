@@ -1,4 +1,4 @@
-"""scripts/runpod_parse_document.py: the standalone client sample for every Runpod model.
+"""clients/runpod-ocr-client/runpod_parse_document.py: the standalone client for every Runpod model.
 
 The script imports nothing from this repo, so these tests pin it to the harness: the same
 prompts, sampling, image preparation, crops and output parsing as `ocr_bench.models`.
@@ -23,7 +23,7 @@ from tests.conftest import _write_digital_pdf
 
 ROOT = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location(
-    "runpod_parse_document", ROOT / "scripts" / "runpod_parse_document.py"
+    "runpod_parse_document", ROOT / "clients" / "runpod-ocr-client" / "runpod_parse_document.py"
 )
 rpd = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = rpd  # dataclasses resolve annotations through sys.modules
@@ -497,3 +497,34 @@ def test_cli_falls_back_to_the_management_key(tmp_path, monkeypatch):
     monkeypatch.setattr(rpd, "parse_document", fake_parse)
     rpd.main(["--model", "dotsocr", str(_png(tmp_path / "a.png")), "-o", str(tmp_path / "o")])
     assert seen["api_key"] == "mgmt"
+
+
+@pytest.mark.parametrize(
+    ("error", "code", "message"),
+    [
+        (rpd.EndpointNotReady("no worker ready after 600s"), 3, "no worker ready"),
+        (ValueError("x.docx: not a PDF or image"), 2, "not a PDF or image"),
+        (
+            httpx.HTTPStatusError(
+                "denied",
+                request=httpx.Request("POST", BASE),
+                response=httpx.Response(401, request=httpx.Request("POST", BASE)),
+            ),
+            4,
+            "check the API key",
+        ),
+    ],
+)
+def test_cli_reports_errors_without_a_traceback(
+    tmp_path, monkeypatch, capsys, error, code, message
+):
+    monkeypatch.setenv("DOTSOCR_BASE_URL", BASE)
+    monkeypatch.setenv("DOTSOCR_API_KEY", "k")
+
+    async def fail(*args, **kw):
+        raise error
+
+    monkeypatch.setattr(rpd, "parse_document", fail)
+    assert rpd.main(["--model", "dotsocr", str(_png(tmp_path / "a.png"))]) == code
+    err = capsys.readouterr().err
+    assert message in err and "Traceback" not in err

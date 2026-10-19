@@ -1,0 +1,5 @@
+# Runpod OCR client (runpod_parse_document.py). Python >= 3.10.
+# Versions are the ones the client was tested with; newer minor versions should work.
+httpx==0.28.1
+pillow==12.3.0
+pypdfium2==5.13.0  # PDF rendering
