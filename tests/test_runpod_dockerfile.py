@@ -79,6 +79,8 @@ def test_teleocr_repeats_devcontainer_install_with_same_commit():
 def test_paddle_installs_gpu_paddlex():
     paddle = _stages()["paddle"]
     assert "PADDLE_PKG=paddlepaddle-gpu" in paddle
+    # paddlepaddle-gpu 3.x is only on Paddle's own index (PyPI stops at 2.6.x)
+    assert "PADDLE_INDEX=https://www.paddlepaddle.org.cn/packages/stable/cu126/" in paddle
     assert "paddleocr[doc-parser]==3.7.0" in paddle
 
 

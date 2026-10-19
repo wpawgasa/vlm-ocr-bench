@@ -61,8 +61,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 libglib2.0-0 libgomp1 curl \
     && rm -rf /var/lib/apt/lists/*
 
+# paddlepaddle-gpu 3.x is published only on Paddle's index (PyPI stops at 2.6.x); CUDA 12.6
+# wheels, as the devcontainer's GPU layout path uses; the wheel brings its own CUDA libraries.
 ARG PADDLE_PKG=paddlepaddle-gpu
-ARG PADDLE_INDEX=https://pypi.org/simple
+ARG PADDLE_INDEX=https://www.paddlepaddle.org.cn/packages/stable/cu126/
 RUN pip install --no-cache-dir "${PADDLE_PKG}==3.3.1" -i "${PADDLE_INDEX}" \
         --extra-index-url https://pypi.org/simple \
     && pip install --no-cache-dir "paddleocr[doc-parser]==3.7.0" \

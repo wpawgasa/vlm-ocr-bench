@@ -71,7 +71,7 @@ def endpoint_body(
         **_kind_field(cfg),
         "gpuTypeIds": ep.gpu_types,
         "dataCenterIds": ep.data_centers,
-        "allowedCudaVersions": [ep.cuda_min],
+        "allowedCudaVersions": ep.allowed_cuda_versions(),
         "workers": {"min": workers_min, "max": ep.workers_max},
         "idleTimeout": ep.idle_timeout_s,
         "scaling": {"type": ep.scaler.type, "value": ep.scaler.value},
