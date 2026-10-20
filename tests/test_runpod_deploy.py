@@ -130,7 +130,7 @@ def test_first_deploy_creates_template_and_endpoint(configs, tmp_path):
         "minCudaVersion": "12.8",
     }
     assert ep_body["dataCenterIds"] == ["EU-RO-1"]
-    assert ep_body["workers"] == {"min": 0, "max": 3, "idleTimeout": 120}
+    assert ep_body["workers"] == {"min": 0, "max": 2, "idleTimeout": 120}
     assert ep_body["scaling"] == {"type": "REQUEST_COUNT", "requestCount": 4}
     assert ep_body["flashboot"] == "FLASHBOOT"
     assert fake.endpoints[0]["image"] == tmpl_body["image"]  # applied from the template
@@ -183,7 +183,7 @@ def test_scaling_only_change_patches_endpoint_without_new_template(configs, tmp_
     assert [(m, p) for m, p, _ in fake.writes] == [
         ("PATCH", f"/v2/serverless/{fake.endpoints[0]['id']}")
     ]
-    assert fake.writes[0][2] == {"workers": {"min": 1, "max": 3, "idleTimeout": 120}}
+    assert fake.writes[0][2] == {"workers": {"min": 1, "max": 2, "idleTimeout": 120}}
     assert len(fake.templates) == 1
     assert len(load_releases(tmp_path / "releases.yaml")) == 1
 

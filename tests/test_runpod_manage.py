@@ -167,7 +167,7 @@ def test_status_reports_endpoint_release_and_workers(configs, tmp_path, deployed
     assert "…" in st.masked_id
     assert deployed.endpoints[0]["id"] not in st.masked_id
     assert st.parity == "pending" and st.promoted is False
-    assert st.workers == {"min": 0, "max": 3}
+    assert st.workers == {"min": 0, "max": 2}
     assert st.release_digest == DIGEST
 
 

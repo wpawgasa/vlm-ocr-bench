@@ -20,7 +20,7 @@ endpoint:
   kind: load_balancing
   gpu_types: ["NVIDIA L4", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 3090"]
   workers_min: 0
-  workers_max: 3
+  workers_max: 2
   idle_timeout_s: 120
   scaler: {type: REQUEST_COUNT, value: 4}
   flashboot: true
