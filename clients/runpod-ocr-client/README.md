@@ -104,7 +104,7 @@ The output is one Markdown document, with one section per page:
 - **Speed.** A page takes about 3 to 20 seconds once a worker is up, depending on the model
   and the page.
 - **Limits.** Each request may run up to 5.5 minutes and carry up to 30 MB, which is far more
-  than a page needs. Each endpoint runs at most 3 workers; keep `--concurrency` at 12 or
+  than a page needs. Each endpoint runs at most 2 workers; keep `--concurrency` at 8 or
   below. Above that, requests get dropped and retried.
 - **Retries.** Rate limits (429), gateway errors (5xx) and timeouts are retried 3 times with
   backoff.
