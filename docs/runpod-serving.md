@@ -30,6 +30,36 @@ The TeleOCR pin is newer than the snapshot used for benchmark run `2026-09-22-a`
 `README.md` and added `.eval_results/parsebench.yaml`, so the weights are identical. The
 dots.ocr pin matches the benchmarked snapshot.
 
+## First deployment (task 6.1, 2026-10-19)
+
+Three models are deployed: `dotsocr`, `typhoon_ocr15` and `paddleocr_vl`. `teleocr` and
+`ovisocr2` are out of scope for now. Their configs and images stay buildable, but they have
+no endpoints, release records or smoke runs.
+
+- **Deploy path.** `ocrbench runpod deploy` created each template and load-balancing
+  endpoint through the REST API (`https://api.runpod.io/v2`). The console fallback from
+  design Risks was not needed.
+- **Registry pull.** Each worker pulled its image from
+  `code.loolootech.com/loolootech/runpod-<model>` with the Runpod registry credential.
+  That deploy was the pull test moved from 5.2.
+- **GPU.** All three run on the 24 GB pool (`AMPERE_24`, MIG slices excluded) with
+  `workers: {min: 0, max: 2}`. vLLM 0.11.0 starts there with `cuda_min` 12.8.
+- **Keys.** One shared restricted client key (Serverless Read/Write, no management access)
+  works on all three endpoints. The REST management API rejects it with 403. The
+  management key reads `ocrbench runpod status` for each model.
+
+Smoke runs on 2026-10-19 used only the client key. The cold-start SLO is 90 s and the page
+SLO is 20 s:
+
+| Model | Image digest | Cold start | Page | Layout |
+|---|---|---|---|---|
+| `dotsocr` | `sha256:295b10b8…` | 82.1 s | 9.2 s | |
+| `typhoon_ocr15` | `sha256:2ce4e4b2…` | 96.9 s | 6.7 s | |
+| `paddleocr_vl` | `sha256:2af91a60…` | 108.7 s | 17.5 s | 3.6 s |
+
+Each figure is one cold start, measured as the first request after scale-to-zero. Task 6.2
+takes the five-sample measurements that decide `slo: met|missed`.
+
 ## Client sample: document to Markdown (any model)
 
 `clients/runpod-ocr-client/runpod_parse_document.py` is a standalone client. It imports nothing from this repo
