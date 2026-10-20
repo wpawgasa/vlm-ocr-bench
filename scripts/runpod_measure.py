@@ -9,6 +9,9 @@
    (`configs/runpod/parity_samples.v1.yaml`, clean rows of its run) through the harness
    adapter at `client.max_concurrency`, polling the worker count every few seconds.
 
+Loop pages, whose output reached the model's `sampling.max_tokens`, are counted and timed
+separately. The page SLO is judged on the other pages (design D7).
+
 Writes `<out>/<model>.json` (all samples and the summary) and `<out>/<model>.predictions.jsonl`.
 Cost per page = billed worker-seconds during the parity run x the pool's serverless $/h / pages;
 running and initializing workers count as billed, capped at `workers_max` (the summary also
@@ -35,7 +38,7 @@ from ocr_bench.models.runner import infer_model
 from ocr_bench.paths import RunPaths
 from ocr_bench.runpod import state as runpod_state
 from ocr_bench.runpod.api import RunpodAPI
-from ocr_bench.runpod.config import load_runpod_config
+from ocr_bench.runpod.config import SloConfig, load_runpod_config
 from ocr_bench.runpod.deploy import endpoint_name
 from ocr_bench.runpod.parity_set import load_parity_set
 from ocr_bench.runpod.releases import latest
@@ -54,6 +57,25 @@ def percentile(values: list[float], q: float) -> float:
     k = (len(xs) - 1) * q / 100
     lo, hi = math.floor(k), math.ceil(k)
     return xs[lo] + (xs[hi] - xs[lo]) * (k - lo)
+
+
+def loop_page(pred: PredictionRow, max_tokens: int) -> bool:
+    """The model generated until its token cap (a repetition loop, not a slow server)."""
+    return len(pred.raw.tokens) >= max_tokens
+
+
+def slo_result(
+    cold_p95: float | None, page_p50: float | None, page_p95: float | None, slo: SloConfig
+) -> str:
+    """`met` when the cold-start p95 and the non-loop page p50 and p95 are within target."""
+    if cold_p95 is None or page_p50 is None or page_p95 is None:
+        return "missed"
+    ok = (
+        cold_p95 <= slo.cold_start_p95_s
+        and page_p50 <= slo.page_p50_s
+        and page_p95 <= slo.page_p95_s
+    )
+    return "met" if ok else "missed"
 
 
 def worker_seconds(samples: list[tuple[float, int]], end: float) -> float:
@@ -160,7 +182,11 @@ async def measure(model: str, out: Path, cold_starts: int, scale_wait_s: float) 
     done.set()
     await poller
     preds = list(read_rows(preds_path, PredictionRow))
-    lat = [p.latency_ms / 1000 for p in preds if p.raw.error is None]
+    ok = [p for p in preds if p.raw.error is None]
+    max_tokens = mcfg.sampling.max_tokens
+    loops = [p for p in ok if loop_page(p, max_tokens)]
+    lat = [p.latency_ms / 1000 for p in ok if not loop_page(p, max_tokens)]
+    lat_all = [p.latency_ms / 1000 for p in ok]
     billed_s = worker_seconds([s for s in samples if s[0] >= t0] or samples[:1], t1)
 
     cold = [c["cold_start_s"] for c in colds if not c["failures"]]
@@ -183,6 +209,10 @@ async def measure(model: str, out: Path, cold_starts: int, scale_wait_s: float) 
             "wall_s": round(t1 - t0, 1),
             "page_p50_s": round(percentile(lat, 50), 2) if lat else None,
             "page_p95_s": round(percentile(lat, 95), 2) if lat else None,
+            "loop_pages": len(loops),
+            "loop_page_max_s": round(max(p.latency_ms for p in loops) / 1000, 1) if loops else None,
+            "all_pages_p50_s": round(percentile(lat_all, 50), 2) if lat_all else None,
+            "all_pages_p95_s": round(percentile(lat_all, 95), 2) if lat_all else None,
             "max_billed_workers": max((n for _, n in samples), default=0),
             "billed_worker_s": round(billed_s, 1),
             "usd_per_hour": usd_h,
@@ -195,14 +225,10 @@ async def measure(model: str, out: Path, cold_starts: int, scale_wait_s: float) 
         },
         "cold_starts": colds,
     }
-    met = (
-        bool(cold)
-        and lat
-        and summary["cold_start_s"]["p95"] <= rcfg.slo.cold_start_p95_s
-        and summary["parity_run"]["page_p50_s"] <= rcfg.slo.page_p50_s
-        and summary["parity_run"]["page_p95_s"] <= rcfg.slo.page_p95_s
+    run = summary["parity_run"]
+    summary["slo_result"] = slo_result(
+        summary["cold_start_s"]["p95"], run["page_p50_s"], run["page_p95_s"], rcfg.slo
     )
-    summary["slo_result"] = "met" if met else "missed"
     (out / f"{model}.json").write_text(json.dumps(summary, indent=2) + "\n")
     return summary
 

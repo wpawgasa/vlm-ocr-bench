@@ -46,3 +46,25 @@ def test_billed_workers_counts_running_and_initializing_capped_at_workers_max():
 
     assert measure.billed_workers(FakeAPI(), "ep") == 5
     assert measure.billed_workers(FakeAPI(), "ep", cap=2) == 2
+
+
+def _pred(n_tokens, error=None):
+    from ocr_bench.schemas import RawPrediction
+
+    return type("P", (), {"raw": RawPrediction(tokens=["x"] * n_tokens, error=error)})()
+
+
+def test_loop_page_is_one_whose_output_reached_max_tokens():
+    assert measure.loop_page(_pred(8192), 8192)
+    assert not measure.loop_page(_pred(8191), 8192)
+
+
+def test_slo_result_judges_cold_start_and_non_loop_page_latency():
+    from ocr_bench.runpod.config import SloConfig
+
+    slo = SloConfig(page_p50_s=10, page_p95_s=30, cold_start_p95_s=120)
+    assert measure.slo_result(115.0, 9.4, 22.6, slo) == "met"
+    assert measure.slo_result(121.0, 9.4, 22.6, slo) == "missed"
+    assert measure.slo_result(115.0, 10.5, 22.6, slo) == "missed"
+    assert measure.slo_result(115.0, 9.4, 31.0, slo) == "missed"
+    assert measure.slo_result(None, 9.4, 22.6, slo) == "missed"

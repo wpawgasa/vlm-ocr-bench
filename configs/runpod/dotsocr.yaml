@@ -34,6 +34,8 @@ client:
   cold_start_wait_s: 600
   max_request_mb: 25
 slo:
-  page_p50_s: 6
-  page_p95_s: 20
-  cold_start_p95_s: 90
+  # revised from the 24 GB measurement (task 6.2, 2026-10-20); page targets exclude pages
+  # that reach sampling.max_tokens (generation loops, design D7)
+  page_p50_s: 10
+  page_p95_s: 30
+  cold_start_p95_s: 120

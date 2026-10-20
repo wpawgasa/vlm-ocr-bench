@@ -43,7 +43,7 @@
       "PORT_HEALTH": "8000"
     },
     "image": "code.loolootech.com/loolootech/runpod-typhoon_ocr15@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "name": "ocrbench-typhoon_ocr15-2d942f92",
+    "name": "ocrbench-typhoon_ocr15-ac7c5434",
     "ports": [
       "8000/http"
     ],

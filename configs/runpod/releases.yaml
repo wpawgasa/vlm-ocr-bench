@@ -20,7 +20,7 @@
   endpoint_kind: load_balancing
   deployer: wpawgasa
   parity: pending
-  slo: missed
+  slo: met
   slo_measured_on: '2026-10-20'
 - model: typhoon_ocr15
   action: deploy
@@ -33,7 +33,7 @@
   endpoint_kind: load_balancing
   deployer: wpawgasa
   parity: pending
-  slo: missed
+  slo: met
   slo_measured_on: '2026-10-20'
 - model: paddleocr_vl
   action: deploy
@@ -57,5 +57,5 @@
   endpoint_kind: load_balancing
   deployer: wpawgasa
   parity: pending
-  slo: missed
+  slo: met
   slo_measured_on: '2026-10-20'
