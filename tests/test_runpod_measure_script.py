@@ -30,6 +30,8 @@ def test_cost_per_page_uses_hourly_price():
 
 
 def test_parity_rows_are_sixty_clean_rows_with_local_images():
+    if not measure.RunPaths.for_run("2026-09-22-a").manifest.exists():
+        pytest.skip("run 2026-09-22-a not pulled (dvc pull)")
     rows = measure.parity_rows("2026-09-22-a")
     assert len(rows) == 60
     assert len({r.sample_id for r in rows}) == 60
