@@ -32,7 +32,7 @@
     "type": "LOAD_BALANCER",
     "workers": {
       "idleTimeout": 120,
-      "max": 3,
+      "max": 2,
       "min": 0
     }
   },
@@ -43,7 +43,7 @@
       "PORT_HEALTH": "8000"
     },
     "image": "code.loolootech.com/loolootech/runpod-dotsocr@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "name": "ocrbench-dotsocr-2f54a41d",
+    "name": "ocrbench-dotsocr-361841fe",
     "ports": [
       "8000/http"
     ],

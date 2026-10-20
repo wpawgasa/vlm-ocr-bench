@@ -32,7 +32,7 @@
     "type": "LOAD_BALANCER",
     "workers": {
       "idleTimeout": 120,
-      "max": 3,
+      "max": 2,
       "min": 0
     }
   },
@@ -43,7 +43,7 @@
       "PORT_HEALTH": "8000"
     },
     "image": "code.loolootech.com/loolootech/runpod-ovisocr2@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "name": "ocrbench-ovisocr2-84afd251",
+    "name": "ocrbench-ovisocr2-c44dda31",
     "ports": [
       "8000/http"
     ],

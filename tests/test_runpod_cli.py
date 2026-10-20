@@ -88,4 +88,4 @@ def test_render_prints_argv_and_bodies(tmp_path):
     assert "--max-log-len 0" in result.output
     bodies = json.loads(result.output[result.output.index("\n{\n") :])
     assert bodies["template"]["image"].endswith(f"runpod-dotsocr@{digest}")
-    assert bodies["endpoint"]["workers"]["max"] == 3
+    assert bodies["endpoint"]["workers"]["max"] == 2
