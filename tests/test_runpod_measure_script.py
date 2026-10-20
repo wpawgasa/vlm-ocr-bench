@@ -37,3 +37,12 @@ def test_parity_rows_are_sixty_clean_rows_with_local_images():
     missing = [r.image_path for r in rows if not (root / r.image_path).exists()]
     if missing:
         pytest.skip(f"{len(missing)} parity images not pulled (dvc pull)")
+
+
+def test_billed_workers_counts_running_and_initializing_capped_at_workers_max():
+    class FakeAPI:
+        def _call(self, method, path):
+            return {"summary": {"idle": 2, "initializing": 4, "running": 1, "throttled": 3}}
+
+    assert measure.billed_workers(FakeAPI(), "ep") == 5
+    assert measure.billed_workers(FakeAPI(), "ep", cap=2) == 2

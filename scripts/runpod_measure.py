@@ -11,7 +11,8 @@
 
 Writes `<out>/<model>.json` (all samples and the summary) and `<out>/<model>.predictions.jsonl`.
 Cost per page = billed worker-seconds during the parity run x the pool's serverless $/h / pages;
-running and initializing workers count as billed. Needs `RUNPOD_API_KEY` (management),
+running and initializing workers count as billed, capped at `workers_max` (the summary also
+counts starting slots beyond the cap, which are not billed). Needs `RUNPOD_API_KEY` (management),
 `<MODEL>_BASE_URL`, `<MODEL>_API_KEY` and, for Paddle, `PADDLE_PIPELINE_URL`.
 """
 
@@ -67,9 +68,10 @@ def cost_per_page(billed_s: float, pages: int, usd_per_hour: float) -> float:
     return billed_s * usd_per_hour / 3600 / pages
 
 
-def billed_workers(api: RunpodAPI, endpoint_id: str) -> int:
+def billed_workers(api: RunpodAPI, endpoint_id: str, cap: int | None = None) -> int:
     summary = api._call("GET", f"/serverless/{endpoint_id}/workers").get("summary", {})
-    return sum(int(summary.get(k, 0)) for k in BILLED)
+    n = sum(int(summary.get(k, 0)) for k in BILLED)
+    return min(n, cap) if cap is not None else n
 
 
 def serverless_price(api: RunpodAPI, pools: list[str], excluded: list[str]) -> float:
@@ -141,7 +143,7 @@ async def measure(model: str, out: Path, cold_starts: int, scale_wait_s: float) 
 
     async def poll() -> None:
         while not done.is_set():
-            n = await asyncio.to_thread(billed_workers, api, endpoint_id)
+            n = await asyncio.to_thread(billed_workers, api, endpoint_id, rcfg.endpoint.workers_max)
             samples.append((time.monotonic(), n))
             try:
                 await asyncio.wait_for(done.wait(), timeout=5)

@@ -60,6 +60,57 @@ SLO is 20 s:
 Each figure is one cold start, measured as the first request after scale-to-zero. Task 6.2
 takes the five-sample measurements that decide `slo: met|missed`.
 
+## Measurements (task 6.2, 2026-10-20)
+
+Measured with `scripts/runpod_measure.py` at git `2910ebb`. Each model ran on the 24 GB
+pool with `workers: {min: 0, max: 2}` and a serverless price of $0.69/h. The run had two parts:
+
+- **Cold starts:** five per model, each after the endpoint had scaled to zero. A cold start
+  is the time until health is ready.
+- **Page run:** right after the fifth cold start, the 60-page parity set
+  (`parity_samples.v1`) at `client.max_concurrency` = 4, through the harness adapters. It
+  produced no error rows.
+
+| Model | Image digest | Cold start p50 / p95 | Page p50 / p95 | Page p50 / p95, loops excluded | Loop pages | $/page | SLO |
+|---|---|---|---|---|---|---|---|
+| `dotsocr` | `sha256:295b10b8…` | 16.1 / 90.6 s | 10.9 / 75.8 s | 9.4 / 22.6 s | 8 of 60 | ≤ 0.0020 | missed |
+| `typhoon_ocr15` | `sha256:2ce4e4b2…` | 91.2 / 98.8 s | 8.6 / 111.7 s | 7.7 / 25.0 s | 6 of 60 | ≤ 0.0019 | missed |
+| `paddleocr_vl` | `sha256:2af91a60…` | 6.1 / 113.3 s | 5.8 / 26.1 s | 5.4 / 24.6 s | 2 of 60 | 0.00055 | missed |
+
+The SLO targets were page p50 ≤ 6 s, page p95 ≤ 20 s and cold start p95 ≤ 90 s (design D7).
+The release records carry `slo: missed`.
+
+**Cold starts come in two kinds.**
+
+- **Resume:** FlashBoot brings a recently stopped worker back in 2–16 s.
+- **Full start:** vLLM loads the weights and captures CUDA graphs. This takes 86–92 s for
+  dotsocr, 91–99 s for typhoon_ocr15 and 107–115 s for paddleocr_vl, which also starts the
+  PaddleX layout pipeline.
+
+Each model got 2 or 3 full starts out of 5. Every full start except dotsocr's 86 s one is
+over the 90 s target. The design's answer for client traffic is still `workers_min: 1` in
+office hours (`--profile office`, task 6.5), which removes the cold start from the first page.
+
+**The page tail is generation loops, not serving.**
+
+- Every page above 30 s hit the model's `max_tokens`: 8192 for dotsocr and paddleocr_vl,
+  10000 for typhoon_ocr15. At 24 GB-class speed a loop page takes 70–90 s on dotsocr and
+  107–116 s on typhoon_ocr15. The typhoon_ocr15 figure is close to the 120 s client
+  `request_timeout_s`.
+- The H100 run `2026-09-22-a` looped about as often on the same 60 pages: 7, 6 and 8 pages.
+  Which pages loop differs slightly between the GPUs.
+- That run's own p95 over these pages was also above 20 s: 39 s for dotsocr and 52 s for
+  typhoon_ocr15, under benchmark load.
+
+The 20 s p95 target is therefore not reachable on this page mix for these models. With the
+loop pages excluded, dotsocr and typhoon_ocr15 still miss p50 ≤ 6 s on these GPUs.
+
+**How cost per page is computed.** It is billed worker-seconds during the page run times
+$0.69/h, divided by 60. Running and initializing workers count as billed, capped at
+`workers_max`, so the dotsocr and typhoon_ocr15 figures are upper bounds. Their page runs
+used up to 2 workers. paddleocr_vl's used 1. Idle time after a burst (120 s × $0.00019/s ≈
+$0.023) is not included.
+
 ## Client sample: document to Markdown (any model)
 
 `clients/runpod-ocr-client/runpod_parse_document.py` is a standalone client. It imports nothing from this repo
