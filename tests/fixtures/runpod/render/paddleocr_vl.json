@@ -43,7 +43,7 @@
       "PORT_HEALTH": "8080"
     },
     "image": "code.loolootech.com/loolootech/runpod-paddleocr_vl@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "name": "ocrbench-paddleocr_vl-9fba3d1c",
+    "name": "ocrbench-paddleocr_vl-3e9e26c9",
     "ports": [
       "8080/http"
     ],

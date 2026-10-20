@@ -104,11 +104,15 @@ Each endpoint SHALL be deployed with the GPU types, worker counts, idle timeout,
 - **THEN** `smoke` exits non-zero naming both names before sending any page
 
 ### Requirement: Service levels and cost recorded per model
-The serving documentation SHALL state, per model and GPU class, the measured cold start, page latency p50 and p95 on the smoke page set, the cost per page derived from the per-second GPU price, and the SLO targets from the configuration. A model whose measured p95 exceeds its target SHALL be marked as not meeting its SLO in the documentation and in its release record.
+The serving documentation SHALL state, per model and GPU class, the measured cold start, page latency p50 and p95 on the smoke page set, the cost per page derived from the per-second GPU price, and the SLO targets from the configuration. Pages whose output reached the model's `sampling.max_tokens` (loop pages) SHALL be counted and timed separately and SHALL NOT count toward the page latency targets. A model whose measured non-loop p50 or p95, or cold-start p95, exceeds its target SHALL be marked as not meeting its SLO in the documentation and in its release record.
 
 #### Scenario: Measurement recorded
 - **WHEN** the latency measurement task completes for dots.ocr on the 24 GB class
 - **THEN** `docs/runpod-serving.md` lists its cold start, p50, p95 and cost per page with the date and image digest
+
+#### Scenario: Loop pages reported separately
+- **WHEN** 8 of the 60 measured pages reach `sampling.max_tokens`
+- **THEN** the documentation reports their count and slowest time, and p50 and p95 are computed over the other 52 pages
 
 #### Scenario: SLO missed
 - **WHEN** a model's measured p95 is above `slo.page_p95_s`

@@ -43,7 +43,7 @@
       "PORT_HEALTH": "8000"
     },
     "image": "code.loolootech.com/loolootech/runpod-dotsocr@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "name": "ocrbench-dotsocr-361841fe",
+    "name": "ocrbench-dotsocr-5cd8bf45",
     "ports": [
       "8000/http"
     ],

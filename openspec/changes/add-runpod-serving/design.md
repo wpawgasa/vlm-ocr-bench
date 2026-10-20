@@ -93,9 +93,9 @@ client:
   cold_start_wait_s: 600
   max_request_mb: 25
 slo:
-  page_p50_s: 6
-  page_p95_s: 20
-  cold_start_p95_s: 90
+  page_p50_s: 10
+  page_p95_s: 30
+  cold_start_p95_s: 120
 ```
 
 A pydantic schema in `ocr_bench/runpod/config.py` validates it: the `model` must exist in `configs/models/`, the digest must be a digest, the revision a commit hash, `data_centers` non-empty at deploy time, and the rendered `vllm serve` argument list must contain the logging flags from D9. The config hash (SHA-256 of the canonical YAML) is part of every release record.
@@ -173,7 +173,7 @@ Production clients outside this repo follow the same contract with any OpenAI SD
 ### D7. Production settings, SLOs, cost, monitoring, rollback
 - **GPU class:** 24 GB (L4 / A5000 / 3090, bf16, $0.00019/s ≈ $0.68/h) for all five; 48 GB (A40 / A6000) as the second priority for availability. OvisOCR2's `--gdn-prefill-backend=triton` on sm_89 and vLLM 0.11.0's CUDA requirement against Runpod's driver pool (`cuda_min`) are verified in task 6.1.
 - **Scaling:** endpoints that may receive client traffic run `workers_min: 1` in business hours (no cold start on the first page; ≈$16/day on a 24 GB GPU) and 0 otherwise, toggled by `ocrbench runpod deploy --profile {office,off}`; `workers_max: 3`; `REQUEST_COUNT` scaler with value = `client.max_concurrency`; idle timeout 120 s (a statement is 5–30 pages a few seconds apart; 5 s would thrash). FlashBoot on. Experimental models (TeleOCR, OvisOCR2) stay at `workers_min: 0`.
-- **SLOs (initial targets, confirmed or revised by task 6.2's measurement):** page latency p50 ≤ 6 s, p95 ≤ 20 s for the single-request models and Paddle; TeleOCR (one layout + N block requests) p95 ≤ 40 s; cold start (first 204 → first 200) p95 ≤ 90 s; smoke success ≥ 99% over a month. dots.ocr's loop rows (8192 tokens) are the p99 tail and are bounded by the 120 s client timeout, not by an SLO.
+- **SLOs (revised by task 6.2's measurement on 2026-10-20; the initial targets were p50 ≤ 6 s, p95 ≤ 20 s, cold start ≤ 90 s):** page latency p50 ≤ 10 s, p95 ≤ 30 s for the single-request models and Paddle on the 24 GB class; TeleOCR (one layout + N block requests) p95 ≤ 40 s, unmeasured; cold start (first 204 → first 200) p95 ≤ 120 s; smoke success ≥ 99% over a month. Page targets exclude loop pages, whose output reached `sampling.max_tokens` (10–13% of the parity set for dots.ocr, Typhoon and Paddle, the same rate as on the H100). Loop pages are counted and timed separately and are bounded by the client timeout, not by an SLO.
 - **Cost estimate:** a page at ~5 s on a 24 GB worker ≈ $0.001; a 20-page statement ≈ $0.02 plus idle (120 s × $0.00019 = $0.023 per burst); one warm worker 8 h/day ≈ $5.5/day. Container disk 20 GB × 5 models ≈ $10/month. These are recomputed from measured latency in the serving doc; a Runpod spend limit (Human) caps the blast radius.
 - **Monitoring:** (1) the scheduled smoke workflow (GitHub Actions cron, every 30 min in business hours, keys as repository secrets) failing twice in a row alerts the maintainers (workflow failure notification; a webhook is an open question); (2) `ocrbench runpod status` reads Runpod's endpoint health/worker counts; (3) the client records per-request latency, status and token counts as numbers only (no content) in its own logs, which is what the harness already does in `predictions.jsonl`.
 - **Versioning and rollback:** an endpoint release = template (immutable) = image digest + config hash + model revision + vLLM version, logged in `configs/runpod/releases.yaml`. `rollback` re-points the endpoint at the previous template; workers restart with the old image. Model-config (`configs/models/*.yaml`) changes are not releases: they change prompts on the client side and are versioned by `prompt_version`.
